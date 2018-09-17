@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:analyzer/dart/ast/visitor.dart';
+//import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:build/build.dart';
 import 'package:build_resolvers/build_resolvers.dart';
@@ -10,12 +10,12 @@ import 'package:build_runner_core/build_runner_core.dart';
 import 'package:build_runner_core/src/asset/cache.dart';
 import 'package:code_health/code_transfer.dart';
 import 'package:code_health/src/code_transfer/work_result.dart';
-import 'package:code_health/src/common/directive_info.dart';
-import 'package:code_health/src/common/directive_priority.dart';
+//import 'package:code_health/src/common/directive_info.dart';
+//import 'package:code_health/src/common/directive_priority.dart';
 import 'package:code_health/src/common/visitor/exported_elements_visitor.dart';
-import 'package:code_health/src/common/visitor/used_imported_elements_visitor.dart';
+//import 'package:code_health/src/common/visitor/used_imported_elements_visitor.dart';
 import 'package:glob/glob.dart';
-import 'package:analyzer/dart/ast/ast.dart';
+//import 'package:analyzer/dart/ast/ast.dart';
 import 'package:build_resolvers/src/resolver.dart';
 import 'package:build/src/builder/build_step_impl.dart';
 import 'package:analyzer/src/generated/resolver.dart';

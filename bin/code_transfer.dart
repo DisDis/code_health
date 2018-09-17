@@ -15,5 +15,5 @@ void initLog() {
 }
 
 main(List<String> arguments) {
-  new CodeTransfer(new Settings());
+  new CodeTransfer(new Settings()).runForPackage(arguments[1]);
 }
