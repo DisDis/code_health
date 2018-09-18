@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 //import 'package:analyzer/dart/ast/visitor.dart';
+import 'package:analyzer/analyzer.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:build/build.dart';
 import 'package:build_resolvers/build_resolvers.dart';
@@ -13,6 +14,7 @@ import 'package:code_health/src/code_transfer/work_result.dart';
 //import 'package:code_health/src/common/directive_info.dart';
 //import 'package:code_health/src/common/directive_priority.dart';
 import 'package:code_health/src/common/visitor/exported_elements_visitor.dart';
+import 'package:code_health/src/common/visitor/used_imported_elements_visitor.dart';
 //import 'package:code_health/src/common/visitor/used_imported_elements_visitor.dart';
 import 'package:glob/glob.dart';
 //import 'package:analyzer/dart/ast/ast.dart';
@@ -56,8 +58,17 @@ class CodeTransfer{
     _showReport();
   }
 
+
+  bool _hasJsProxy(AnnotatedNode node) =>
+      node.metadata.any(_isJsProxyAnnotation);
+
+  bool _isJsProxyAnnotation(Annotation node) =>
+      _isAnnotationType(node, 'CHTransfer');
+
+  bool _isAnnotationType(Annotation m, String name) => m.name.name == name;
+
   Future _parseInput(String input) async {
-    /*var inputId = new AssetId.parse(input);
+    var inputId = new AssetId.parse(input);
     var buildStep = new BuildStepImpl(
         inputId,
         [],
@@ -72,23 +83,34 @@ class CodeTransfer{
       var usedImportedElementsVisitor = new UsedImportedElementsVisitor(lib);
       lib.unit.accept(usedImportedElementsVisitor);
       var usedElements = _getUsedElements(usedImportedElementsVisitor.usedElements);
-      var optLibraries = await _getLibrariesForElemets(inputId, usedElements, resolver);
-      var output = _generateImportText(inputId, lib, optLibraries);
-      if (output.isNotEmpty) {
-        final stat = _workResult.statistics[inputId];
-        print('// FileName: "$inputId"  unique old: ${stat.sourceNode} -> new: ${stat.optNode}, agg old: ${stat.sourceAggNode} -> new: ${stat.optAggNode}');
-        print(output);
-        if (settings.applyImports) {
-          final firstImport = lib.unit.directives.firstWhere((dir) => dir.keyword.keyword == Keyword.IMPORT);
-          final lastImport = lib.unit.directives.lastWhere((dir) => dir.keyword.keyword == Keyword.IMPORT);
 
-          _replaceImportsInFile(inputId.path, output, firstImport.firstTokenAfterCommentAndMetadata.charOffset,
-              lastImport.endToken.charOffset);
+
+      for (var declaration in lib.metadata) {
+        _log.info("${declaration.runtimeType} ${declaration}");
+      }
+      for (var declaration in lib.unit.declarations) {
+        if (declaration is ClassDeclaration && _hasJsProxy(declaration)) {
+          _log.info("${declaration.runtimeType} ${declaration}");
         }
       }
+      
+//      var optLibraries = await _getLibrariesForElemets(inputId, usedElements, resolver);
+//      var output = _generateImportText(inputId, lib, optLibraries);
+//      if (output.isNotEmpty) {
+//        final stat = _workResult.statistics[inputId];
+//        print('// FileName: "$inputId"  unique old: ${stat.sourceNode} -> new: ${stat.optNode}, agg old: ${stat.sourceAggNode} -> new: ${stat.optAggNode}');
+//        print(output);
+//        if (settings.applyImports) {
+//          final firstImport = lib.unit.directives.firstWhere((dir) => dir.keyword.keyword == Keyword.IMPORT);
+//          final lastImport = lib.unit.directives.lastWhere((dir) => dir.keyword.keyword == Keyword.IMPORT);
+//
+//          _replaceImportsInFile(inputId.path, output, firstImport.firstTokenAfterCommentAndMetadata.charOffset,
+//              lastImport.endToken.charOffset);
+//        }
+//      }
     } catch(e,st){
       _log.fine("Skip '$inputId'", e, st);
-    }*/
+    }
   }
 
   void _replaceImportsInFile(String filename, String newImports, int fromOffset, int toOffset) {
