@@ -1,14 +1,23 @@
 import 'package:build/build.dart';
 
 class Project{
-  final List<PackageNode> sourcePackages = <PackageNode>[];
-  final List<PackageNode> destPackages = <PackageNode>[];
+  final Map<String, PackageNode> _sourcePackages;
+  final Map<String, PackageNode> _newPackages = <String,PackageNode>{};
+
+  PackageNode getOrCreatePackage(String name){
+    if (_sourcePackages.containsKey(name)){
+      return _sourcePackages[name];
+    }
+    return _newPackages.putIfAbsent(name, ()=>new PackageNode());
+  }
+
+  Project(this._sourcePackages);
 }
 
 class PackageNode{
-  final String name;
+//  final String name;
   final Map<AssetId, FileNode> files = <AssetId, FileNode>{};
-  PackageNode(this.name);
+//  PackageNode(this.name);
 }
 
 class FileNode{

@@ -10,7 +10,9 @@ import 'package:build_runner/build_runner.dart';
 import 'package:build_runner_core/build_runner_core.dart';
 import 'package:build_runner_core/src/asset/cache.dart';
 import 'package:code_health/code_transfer.dart';
+import 'package:code_health/src/code_transfer/code_node.dart' as node;
 import 'package:code_health/src/code_transfer/work_result.dart';
+import 'package:code_health/src/common/resolver_helper.dart';
 //import 'package:code_health/src/common/directive_info.dart';
 //import 'package:code_health/src/common/directive_priority.dart';
 import 'package:code_health/src/common/visitor/exported_elements_visitor.dart';
@@ -22,6 +24,7 @@ import 'package:build_resolvers/src/resolver.dart';
 import 'package:build/src/builder/build_step_impl.dart';
 import 'package:analyzer/src/generated/resolver.dart';
 import 'package:logging/logging.dart' as log show Logger;
+import 'package:package_resolver/package_resolver.dart';
 
 class CodeTransfer{
   static final log.Logger _log = new log.Logger('CodeTransfer');
@@ -33,42 +36,55 @@ class CodeTransfer{
   final WorkResult _workResult;
   CachingAssetReader _reader;
   final Settings settings;
+  PackageResolver _packageResolver;
+  node.Project _project;
 
 
   CodeTransfer(Settings settings): this.settings = settings, _workResult = new WorkResult(settings);
 
-  runForPackage(String package) async {
-    _log.info("Target package: '$package'");
-    var assets = (await io.reader.findAssets(new Glob('lib/**.dart'), package: package).toList()).map((item)=>item.toString())
-        .toList();
-    runForFiles(assets);
+  run() async {
+    _packageResolver = await PackageResolver.loadConfig(new Uri.file('.packages'));
+    final config = await _packageResolver.packageConfigMap;
+    final Map<String, node.PackageNode> sourcePackages = <String, node.PackageNode>{};
+    _log.info('Total packages: ${config.length}');
+    var allFiles = <AssetId> [];
+    var count = 0;
+    for(var package in config.keys) {
+      try {
+        allFiles.addAll(await io.reader.findAssets(new Glob('lib/**.dart'), package: package).toList());
+      } catch (e) {}
+      try {
+        allFiles.addAll(await io.reader.findAssets(new Glob('test/**.dart'), package: package).toList());
+      } catch (e) {}
+      try {
+        allFiles.addAll(await io.reader.findAssets(new Glob('bin/**.dart'), package: package).toList());
+      } catch (e) {}
+      _log.info("  '$package' (${allFiles.length - count})");
+      count = allFiles.length;
+      sourcePackages[package] = new node.PackageNode();
+    };
+    _project = new node.Project(sourcePackages);
+    await _runForFiles(allFiles);
   }
 
-  runForFiles(Iterable<String> inputs) async {
+  _runForFiles(Iterable<AssetId> inputs) async {
     var count = inputs.length;
     _log.info('Total files: $count');
     _reader = new CachingAssetReader(io.reader);
     var index = 0;
     for (var input in inputs) {
       index++;
-      _log.info('$index/$count $input');
+      _log.info('${index.toString().padLeft(6)}/$count $input');
       await _parseInput(input);
     }
-    _log.info('Optimization completed');
-    _showReport();
+//    _log.info('Optimization completed');
+//    _showReport();
   }
 
+  static const String _annotationName = 'CHTransfer';
 
-  bool _hasJsProxy(AnnotatedNode node) =>
-      node.metadata.any(_isJsProxyAnnotation);
 
-  bool _isJsProxyAnnotation(Annotation node) =>
-      _isAnnotationType(node, 'CHTransfer');
-
-  bool _isAnnotationType(Annotation m, String name) => m.name.name == name;
-
-  Future _parseInput(String input) async {
-    var inputId = new AssetId.parse(input);
+  Future _parseInput(AssetId inputId) async {
     var buildStep = new BuildStepImpl(
         inputId,
         [],
@@ -83,18 +99,26 @@ class CodeTransfer{
       var usedImportedElementsVisitor = new UsedImportedElementsVisitor(lib);
       lib.unit.accept(usedImportedElementsVisitor);
       var usedElements = _getUsedElements(usedImportedElementsVisitor.usedElements);
+      var optLibraries = await _getLibrariesForElemets(inputId, usedElements, resolver);
 
 
-      for (var declaration in lib.metadata) {
-        _log.info("${declaration.runtimeType} ${declaration}");
-      }
       for (var declaration in lib.unit.declarations) {
-        if (declaration is ClassDeclaration && _hasJsProxy(declaration)) {
-          _log.info("${declaration.runtimeType} ${declaration}");
+          var annotation = ResolverHelper.getAnnotation(declaration, _annotationName);
+          if (annotation != null){
+            _log.info("${annotation}");
+          }
+      }
+      for (var declaration in lib.unit.directives) {
+        var annotation = ResolverHelper.getAnnotation(declaration, _annotationName);
+        if (annotation != null){
+          _log.info("${annotation}");
         }
       }
+      var packageNode = _project.getOrCreatePackage(inputId.package);
+      packageNode.files[inputId] = _libraryElementToFileNode(inputId, lib, optLibraries);
+
       
-//      var optLibraries = await _getLibrariesForElemets(inputId, usedElements, resolver);
+
 //      var output = _generateImportText(inputId, lib, optLibraries);
 //      if (output.isNotEmpty) {
 //        final stat = _workResult.statistics[inputId];
@@ -153,7 +177,7 @@ class CodeTransfer{
   }
 
   Future<Iterable<LibraryElement>> _getLibrariesForElemets(AssetId inputId, Iterable<Element> elements, Resolver resolver) async {
-    /*var libraries = new Map<LibraryElement, List<Element>>();
+    var libraries = new Map<LibraryElement, List<Element>>();
     for (var element in elements) {
       var source = element.source;
       var library = element.library;
@@ -162,11 +186,11 @@ class CodeTransfer{
         var assetId = source.assetId;
 
         if (assetId.package != inputId.package && source.assetId.path.contains('/src/')){
-          if (settings.allowSrcImport){
+//          if (settings.allowSrcImport){
             optLibrary = library;
-          } else {
-            optLibrary = await _getOptimumLibraryWhichExportsElement(element, resolver);
-          }
+//          } else {
+//            optLibrary = await _getOptimumLibraryWhichExportsElement(element, resolver);
+//          }
         }
       }
       if (libraries.containsKey(optLibrary)) {
@@ -179,19 +203,19 @@ class CodeTransfer{
     }
     // Remove library if another library exports all entities from this library which we use
     var unnecessaryDependentLibraries = new Set<LibraryElement>();
-    if (!settings.allowUnnecessaryDependenciesImports) {
-      for (var library in libraries.keys) {
-        var elementsImportedFromLibrary = libraries[library];
-        for (var anotherLibrary in libraries.keys) {
-          if (library != anotherLibrary) {
-            if (elementsImportedFromLibrary.every((element) => _isLibraryExportsElement(anotherLibrary, element))) {
-              unnecessaryDependentLibraries.add(library);
-            }
-          }
-        }
-      }
-    }
-    return libraries.keys.where((lib)=> !unnecessaryDependentLibraries.contains(lib));*/
+//    if (!settings.allowUnnecessaryDependenciesImports) {
+//      for (var library in libraries.keys) {
+//        var elementsImportedFromLibrary = libraries[library];
+//        for (var anotherLibrary in libraries.keys) {
+//          if (library != anotherLibrary) {
+//            if (elementsImportedFromLibrary.every((element) => _isLibraryExportsElement(anotherLibrary, element))) {
+//              unnecessaryDependentLibraries.add(library);
+//            }
+//          }
+//        }
+//      }
+//    }
+    return libraries.keys.where((lib)=> !unnecessaryDependentLibraries.contains(lib));
   }
 
   Future<LibraryElement> _getOptimumLibraryWhichExportsElement(Element element, Resolver resolverI) async {
@@ -366,6 +390,29 @@ class CodeTransfer{
     return importedLibraries.any((library) {
       return library.hasDeprecated;
     });
+  }
+
+  node.FileNode _libraryElementToFileNode(AssetId assetId, LibraryElement lib, Iterable<LibraryElement> optLibraries) {
+    var fNode = new node.FileNode(assetId);
+    for (var library in lib.importedLibraries){
+      var source = library.source;
+      if (source is AssetBasedSource) {
+        fNode.directImports.add(source.assetId);
+      }
+    }
+    for (var library in lib.exportedLibraries){
+      var source = library.source;
+      if (source is AssetBasedSource) {
+        fNode.exports.add(source.assetId);
+      }
+    }
+    for (var library in optLibraries){
+      var source = library.source;
+      if (source is AssetBasedSource) {
+        fNode.needImports.add(source.assetId);
+      }
+    }
+    return fNode;
   }
 
 }
