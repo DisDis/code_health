@@ -2,7 +2,7 @@ import 'package:analyzer/analyzer.dart';
 import 'package:analyzer/dart/element/element.dart';
 
 class ResolverHelper {
-  static String getComponentStrParameter(Annotation componentAnnotation, String paramName) {
+  static String getAnnotationStrParameter(Annotation componentAnnotation, String paramName) {
     NamedExpression v = componentAnnotation.arguments.arguments.firstWhere((exp){
       return exp is NamedExpression && exp.name.label.name == paramName;
     }, orElse: ()=>null) as NamedExpression;

@@ -65,6 +65,7 @@ class CodeTransfer{
     };
     _project = new node.Project(sourcePackages);
     await _runForFiles(allFiles);
+    await _execTransmutation();
   }
 
   _runForFiles(Iterable<AssetId> inputs) async {
@@ -77,11 +78,14 @@ class CodeTransfer{
       _log.info('${index.toString().padLeft(6)}/$count $input');
       await _parseInput(input);
     }
-//    _log.info('Optimization completed');
+    _log.info('Parsing completed');
 //    _showReport();
   }
 
   static const String _annotationName = 'CHTransfer';
+  static const String _annotationPackageParam = 'package';
+  static const String _annotationExportParam = 'export';
+  static const String _annotationDestParam = 'dest';
 
 
   Future _parseInput(AssetId inputId) async {
@@ -100,22 +104,27 @@ class CodeTransfer{
       lib.unit.accept(usedImportedElementsVisitor);
       var usedElements = _getUsedElements(usedImportedElementsVisitor.usedElements);
       var optLibraries = await _getLibrariesForElemets(inputId, usedElements, resolver);
+      var packageNode = _project.getOrCreatePackage(inputId.package);
+      var fileNode = _libraryElementToFileNode(inputId, lib, optLibraries);
+      packageNode.files[inputId] = fileNode;
 
 
       for (var declaration in lib.unit.declarations) {
           var annotation = ResolverHelper.getAnnotation(declaration, _annotationName);
           if (annotation != null){
-            _log.info("${annotation}");
+            fileNode.transferAssetId = _annotationToAssetId(inputId, annotation);
           }
       }
       for (var declaration in lib.unit.directives) {
         var annotation = ResolverHelper.getAnnotation(declaration, _annotationName);
         if (annotation != null){
-          _log.info("${annotation}");
+          fileNode.transferAssetId = _annotationToAssetId(inputId, annotation);
         }
       }
-      var packageNode = _project.getOrCreatePackage(inputId.package);
-      packageNode.files[inputId] = _libraryElementToFileNode(inputId, lib, optLibraries);
+      if (fileNode.transferAssetId != null && fileNode.transferAssetId != fileNode.assetId){
+        _log.info('${fileNode.assetId} -> ${fileNode.transferAssetId}');
+        _project.addTransferInfo(new node.TransferInfo(fileNode.assetId, fileNode.transferAssetId));
+      }
 
       
 
@@ -413,6 +422,21 @@ class CodeTransfer{
       }
     }
     return fNode;
+  }
+
+  AssetId _annotationToAssetId(AssetId assetId, Annotation annotation) {
+    AssetId result = assetId;
+    var newDest = ResolverHelper.getAnnotationStrParameter(annotation, _annotationDestParam);
+    var newPackage = ResolverHelper.getAnnotationStrParameter(annotation, _annotationPackageParam);
+    result = new AssetId(newPackage != null ? newPackage : assetId.package, newDest != null ? newDest : assetId.path);
+//    if (result.path == assetId.path && result.package == assetId.package){
+//      return null;
+//    }
+    return result;
+  }
+
+  _execTransmutation() async{
+    _log.info('Start transmutation...');
   }
 
 }
