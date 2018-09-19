@@ -5,6 +5,8 @@ class Project{
   final Map<String, PackageNode> _newPackages = <String,PackageNode>{};
   final List<TransferInfo> _transferAssets = <TransferInfo>[];
   Iterable<TransferInfo> get transferAssets => _transferAssets;
+  Iterable<String> get sourcePackages => _sourcePackages.keys;
+  Iterable<String> get newPackages => _newPackages.keys;
 
   PackageNode getOrCreatePackage(String name){
     if (_sourcePackages.containsKey(name)){

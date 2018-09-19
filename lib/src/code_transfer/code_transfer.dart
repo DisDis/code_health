@@ -10,6 +10,7 @@ import 'package:build_runner/build_runner.dart';
 import 'package:build_runner_core/build_runner_core.dart';
 import 'package:build_runner_core/src/asset/cache.dart';
 import 'package:code_health/code_transfer.dart';
+import 'package:code_health/src/code_transfer/actions.dart';
 import 'package:code_health/src/code_transfer/code_node.dart' as node;
 import 'package:code_health/src/code_transfer/work_result.dart';
 import 'package:code_health/src/common/resolver_helper.dart';
@@ -437,6 +438,45 @@ class CodeTransfer{
 
   _execTransmutation() async{
     _log.info('Start transmutation...');
+    Map<AssetId, List<AssetId>> directImportsByAssetId = {};
+    Map<AssetId, List<AssetId>> exportsByAssetId = {};
+    Map<AssetId, List<AssetId>> needImportsByAssetId = {};
+    for (var sPackage in _project.sourcePackages){
+      var package = _project.getOrCreatePackage(sPackage);
+      package.files.forEach((fName, node){
+        node.directImports.forEach((f)=> directImportsByAssetId.putIfAbsent(f, ()=><AssetId>[]).add(node.assetId));
+        node.exports.forEach((f)=> exportsByAssetId.putIfAbsent(f, ()=><AssetId>[]).add(node.assetId));
+        node.needImports.forEach((f)=> needImportsByAssetId.putIfAbsent(f, ()=><AssetId>[]).add(node.assetId));
+      });
+    }
+    Map<AssetId, List<Action>> actionsByFile = <AssetId, List<Action>>{};
+    for (var transferInfo in _project.transferAssets) {
+      var actions = actionsByFile.putIfAbsent(transferInfo.source, () => <Action>[]);
+      actions.add(new MoveFileAction(transferInfo.source, transferInfo.dest));
+      var changeAssets = directImportsByAssetId[transferInfo.source];
+      if (changeAssets != null) {
+        changeAssets.forEach((changeAsset){
+          actionsByFile.putIfAbsent(changeAsset, () => <Action>[]).add(new ChangeImportAction(transferInfo.source, transferInfo.dest));
+        });
+      }
+      changeAssets = exportsByAssetId[transferInfo.source];
+      if (changeAssets != null) {
+        changeAssets.forEach((changeAsset){
+          actionsByFile.putIfAbsent(changeAsset, () => <Action>[]).add(new ChangeExportAction(transferInfo.source, transferInfo.dest));
+        });
+      }
+    }
+    var totalActions = 0;
+    for (var actions in actionsByFile.values){
+      totalActions+= actions.length;
+    }
+    var currectAction = 0;
+    actionsByFile.forEach((file, actions){
+      actions.forEach((action){
+        currectAction++;
+        _log.info("${currectAction.toString().padLeft(6)}/${totalActions} ${action}");
+      });
+    });
   }
 
 }
