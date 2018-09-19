@@ -37,20 +37,21 @@ class CodeTransfer{
   final WorkResult _workResult;
   CachingAssetReader _reader;
   final Settings settings;
-  PackageResolver _packageResolver;
   node.Project _project;
 
 
   CodeTransfer(Settings settings): this.settings = settings, _workResult = new WorkResult(settings);
 
   run() async {
-    _packageResolver = await PackageResolver.loadConfig(new Uri.file('.packages'));
-    final config = await _packageResolver.packageConfigMap;
+    _log.info('Run');
     final Map<String, node.PackageNode> sourcePackages = <String, node.PackageNode>{};
-    _log.info('Total packages: ${config.length}');
+    _log.info('Total packages: ${packageGraph.allPackages.length}');
     var allFiles = <AssetId> [];
     var count = 0;
-    for(var package in config.keys) {
+    for(var package in packageGraph.allPackages.keys) {
+      if (package == '\$sdk'){
+        continue;
+      }
       try {
         allFiles.addAll(await io.reader.findAssets(new Glob('lib/**.dart'), package: package).toList());
       } catch (e) {}
@@ -123,7 +124,7 @@ class CodeTransfer{
         }
       }
       if (fileNode.transferAssetId != null && fileNode.transferAssetId != fileNode.assetId){
-        _log.info('${fileNode.assetId} -> ${fileNode.transferAssetId}');
+//        _log.info('${fileNode.assetId} -> ${fileNode.transferAssetId}');
         _project.addTransferInfo(new node.TransferInfo(fileNode.assetId, fileNode.transferAssetId));
       }
 
@@ -403,20 +404,26 @@ class CodeTransfer{
   }
 
   node.FileNode _libraryElementToFileNode(AssetId assetId, LibraryElement lib, Iterable<LibraryElement> optLibraries) {
-    var fNode = new node.FileNode(assetId);
-    for (var library in lib.importedLibraries){
+    var fNode = new node.FileNode(assetId, lib.unit);
+    for (var part in lib.parts) {
+      var source = part.source;
+      if (source is AssetBasedSource) {
+        fNode.parts.add(source.assetId);
+      }
+    }
+    for (var library in lib.importedLibraries) {
       var source = library.source;
       if (source is AssetBasedSource) {
         fNode.directImports.add(source.assetId);
       }
     }
-    for (var library in lib.exportedLibraries){
+    for (var library in lib.exportedLibraries) {
       var source = library.source;
       if (source is AssetBasedSource) {
         fNode.exports.add(source.assetId);
       }
     }
-    for (var library in optLibraries){
+    for (var library in optLibraries) {
       var source = library.source;
       if (source is AssetBasedSource) {
         fNode.needImports.add(source.assetId);
@@ -429,11 +436,18 @@ class CodeTransfer{
     AssetId result = assetId;
     var newDest = ResolverHelper.getAnnotationStrParameter(annotation, _annotationDestParam);
     var newPackage = ResolverHelper.getAnnotationStrParameter(annotation, _annotationPackageParam);
-    result = new AssetId(newPackage != null ? newPackage : assetId.package, newDest != null ? newDest : assetId.path);
+    result = new AssetId(newPackage != null ? newPackage : assetId.package, newDest != null ? path.join('lib', newDest) : assetId.path);
 //    if (result.path == assetId.path && result.package == assetId.package){
 //      return null;
 //    }
     return result;
+  }
+
+  void _validateAsset(AssetId assetId){
+    if (packageGraph.allPackages[assetId.package].dependencyType != DependencyType.path) {
+      _log.severe('Package "${assetId.package}" not override, code_transfer can not modify "$assetId"');
+      exit(-1);
+    }
   }
 
   _execTransmutation() async{
@@ -451,18 +465,39 @@ class CodeTransfer{
     }
     Map<AssetId, List<Action>> actionsByFile = <AssetId, List<Action>>{};
     for (var transferInfo in _project.transferAssets) {
-      var actions = actionsByFile.putIfAbsent(transferInfo.source, () => <Action>[]);
+      var actions = actionsByFile.putIfAbsent(transferInfo.source, () {
+        _validateAsset(transferInfo.source);
+        return <Action>[];
+      });
       actions.add(new MoveFileAction(transferInfo.source, transferInfo.dest));
       var changeAssets = directImportsByAssetId[transferInfo.source];
       if (changeAssets != null) {
-        changeAssets.forEach((changeAsset){
-          actionsByFile.putIfAbsent(changeAsset, () => <Action>[]).add(new ChangeImportAction(transferInfo.source, transferInfo.dest));
+        changeAssets.forEach((changeAsset) {
+          var list = actionsByFile.putIfAbsent(changeAsset, () {
+            _validateAsset(changeAsset);
+            return <Action>[];
+          });
+          ChangeImportAction action = list.firstWhere((action) => action is ChangeImportAction, orElse: () => null);
+          if (action == null) {
+            action = new ChangeImportAction();
+            list.add(action);
+          }
+          action.replace(transferInfo.source, transferInfo.dest);
         });
       }
       changeAssets = exportsByAssetId[transferInfo.source];
       if (changeAssets != null) {
-        changeAssets.forEach((changeAsset){
-          actionsByFile.putIfAbsent(changeAsset, () => <Action>[]).add(new ChangeExportAction(transferInfo.source, transferInfo.dest));
+        changeAssets.forEach((changeAsset) {
+          var list = actionsByFile.putIfAbsent(changeAsset, () {
+            _validateAsset(changeAsset);
+            return <Action>[];
+          });
+          ChangeExportAction action = list.firstWhere((action) => action is ChangeExportAction, orElse: () => null);
+          if (action == null) {
+            action = new ChangeExportAction();
+            list.add(action);
+          }
+          action.replace(transferInfo.source, transferInfo.dest);
         });
       }
     }
@@ -470,11 +505,12 @@ class CodeTransfer{
     for (var actions in actionsByFile.values){
       totalActions+= actions.length;
     }
-    var currectAction = 0;
-    actionsByFile.forEach((file, actions){
+    var currentAction = 0;
+    actionsByFile.forEach((assetId, actions){
       actions.forEach((action){
-        currectAction++;
-        _log.info("${currectAction.toString().padLeft(6)}/${totalActions} ${action}");
+        currentAction++;
+        _log.info("${currentAction.toString().padLeft(6)}/${totalActions} ${action} -> ${assetId}");
+        action.execute(_project, assetId);
       });
     });
   }

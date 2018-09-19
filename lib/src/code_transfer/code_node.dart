@@ -1,3 +1,4 @@
+import 'package:analyzer/dart/ast/ast.dart';
 import 'package:build/build.dart';
 
 class Project{
@@ -31,11 +32,13 @@ class PackageNode{
 class FileNode{
   final AssetId assetId;
   AssetId transferAssetId;
+  AstNode compilationUnit;
   final List<AssetId> directImports = <AssetId>[];
   final List<AssetId> needImports = <AssetId>[];
   final List<AssetId> exports = <AssetId>[];
+  final List<AssetId> parts = <AssetId>[];
 
-  FileNode(this.assetId);
+  FileNode(this.assetId, this.compilationUnit);
 }
 
 class TransferInfo{
