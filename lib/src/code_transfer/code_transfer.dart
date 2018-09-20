@@ -26,10 +26,11 @@ import 'package:build/src/builder/build_step_impl.dart';
 import 'package:analyzer/src/generated/resolver.dart';
 import 'package:logging/logging.dart' as log show Logger;
 import 'package:package_resolver/package_resolver.dart';
+import 'package:analyzer/src/generated/engine.dart';
 
 class CodeTransfer{
   static final log.Logger _log = new log.Logger('CodeTransfer');
-  static final _resolvers = new AnalyzerResolvers();
+  static final _resolvers = new AnalyzerResolvers(new AnalysisOptionsImpl()..preserveComments = true);
   static final packageGraph = new PackageGraph.forThisPackage();
 
   final io = new IOEnvironment(packageGraph, assumeTty:true);
@@ -44,6 +45,7 @@ class CodeTransfer{
 
   run() async {
     _log.info('Run');
+    var stopwatch = new Stopwatch()..start();
     final Map<String, node.PackageNode> sourcePackages = <String, node.PackageNode>{};
     _log.info('Total packages: ${packageGraph.allPackages.length}');
     var allFiles = <AssetId> [];
@@ -65,9 +67,11 @@ class CodeTransfer{
       count = allFiles.length;
       sourcePackages[package] = new node.PackageNode();
     };
-    _project = new node.Project(sourcePackages);
+    _project = new node.Project(sourcePackages, packageGraph);
     await _runForFiles(allFiles);
     await _execTransmutation();
+    stopwatch.stop();
+    _log.info('Time: ${stopwatch.elapsed.toString()}');
   }
 
   _runForFiles(Iterable<AssetId> inputs) async {
@@ -108,6 +112,7 @@ class CodeTransfer{
       var optLibraries = await _getLibrariesForElemets(inputId, usedElements, resolver);
       var packageNode = _project.getOrCreatePackage(inputId.package);
       var fileNode = _libraryElementToFileNode(inputId, lib, optLibraries);
+//      parseCompilationUnit(lib.source.contents.data)
       packageNode.files[inputId] = fileNode;
 
 
@@ -146,17 +151,6 @@ class CodeTransfer{
     } catch(e,st){
       _log.fine("Skip '$inputId'", e, st);
     }
-  }
-
-  void _replaceImportsInFile(String filename, String newImports, int fromOffset, int toOffset) {
-    final fullname = path.join('.', filename);
-    final str = new File(fullname).readAsStringSync();
-    final res = new StringBuffer();
-    res.write(str.substring(0, fromOffset));
-    res.writeln(newImports);
-    res.write(str.substring(toOffset+1).trimLeft());
-    new File(fullname).writeAsStringSync(res.toString());
-    _log.info("File '$fullname' patched!");
   }
 
 
@@ -450,17 +444,17 @@ class CodeTransfer{
     }
   }
 
-  _execTransmutation() async{
+  _execTransmutation() async {
     _log.info('Start transmutation...');
     Map<AssetId, List<AssetId>> directImportsByAssetId = {};
     Map<AssetId, List<AssetId>> exportsByAssetId = {};
     Map<AssetId, List<AssetId>> needImportsByAssetId = {};
-    for (var sPackage in _project.sourcePackages){
+    for (var sPackage in _project.sourcePackages) {
       var package = _project.getOrCreatePackage(sPackage);
-      package.files.forEach((fName, node){
-        node.directImports.forEach((f)=> directImportsByAssetId.putIfAbsent(f, ()=><AssetId>[]).add(node.assetId));
-        node.exports.forEach((f)=> exportsByAssetId.putIfAbsent(f, ()=><AssetId>[]).add(node.assetId));
-        node.needImports.forEach((f)=> needImportsByAssetId.putIfAbsent(f, ()=><AssetId>[]).add(node.assetId));
+      package.files.forEach((fName, node) {
+        node.directImports.forEach((f) => directImportsByAssetId.putIfAbsent(f, () => <AssetId>[]).add(node.assetId));
+        node.exports.forEach((f) => exportsByAssetId.putIfAbsent(f, () => <AssetId>[]).add(node.assetId));
+        node.needImports.forEach((f) => needImportsByAssetId.putIfAbsent(f, () => <AssetId>[]).add(node.assetId));
       });
     }
     Map<AssetId, List<Action>> actionsByFile = <AssetId, List<Action>>{};
@@ -502,12 +496,13 @@ class CodeTransfer{
       }
     }
     var totalActions = 0;
-    for (var actions in actionsByFile.values){
-      totalActions+= actions.length;
+    for (var actions in actionsByFile.values) {
+      totalActions += actions.length;
     }
     var currentAction = 0;
-    actionsByFile.forEach((assetId, actions){
-      actions.forEach((action){
+    actionsByFile.forEach((assetId, actions) {
+      actions.sort((x, y) => x.priority.compareTo(y.priority));
+      actions.forEach((action) {
         currentAction++;
         _log.info("${currentAction.toString().padLeft(6)}/${totalActions} ${action} -> ${assetId}");
         action.execute(_project, assetId);

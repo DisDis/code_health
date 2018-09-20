@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:analyzer/analyzer.dart';
 import 'package:analyzer/dart/ast/standard_ast_factory.dart';
@@ -8,8 +9,10 @@ import 'package:code_health/src/code_transfer/code_node.dart';
 import 'package:build_resolvers/src/resolver.dart';
 import 'package:analyzer/src/dart/ast/token.dart';
 import 'package:analyzer/src/dart/ast/utilities.dart' show NodeReplacer;
+import 'package:dart_style/dart_style.dart';
 
 abstract class Action{
+  int get priority;
   Future execute(Project project, AssetId assetId);
 
   @override
@@ -19,6 +22,8 @@ abstract class Action{
 }
 
 class _ChangeExportImportAction extends Action {
+  static final dartFormatter = new DartFormatter();
+  final int priority = 1;
   final Map<AssetId,AssetId> _replaceTo = <AssetId,AssetId>{};
   void replace(AssetId source, AssetId dest){
     _replaceTo[source] = dest;
@@ -43,7 +48,9 @@ class _ChangeExportImportAction extends Action {
       }
     });
     fileNode.compilationUnit = compilationUnit;
-//    print(fileNode.compilationUnit.toString());
+    var f = new File(path.join(project.packageGraph.allPackages[fileNode.assetId.package].path,fileNode.assetId.path));
+    var source = fileNode.compilationUnit.toSource();
+    await f.writeAsString(dartFormatter.format(source));
   }
 
 }
@@ -57,11 +64,13 @@ class ChangeExportAction extends _ChangeExportImportAction{
 }
 
 class MoveFileAction extends Action{
+  final int priority = 10;
   final AssetId source;
   final AssetId dest;
   MoveFileAction(this.source, this.dest);
 
   @override
   Future execute(Project project, AssetId assetId) async{
+
   }
 }
