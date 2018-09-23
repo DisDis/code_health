@@ -3,6 +3,7 @@ import 'package:build/build.dart';
 import 'package:build_runner_core/src/package_graph/package_graph.dart';
 
 class Project{
+  final String outputPackagesPath;
   final Map<String, PackageNode> _sourcePackages;
   final Map<String, PackageNode> _newPackages = <String,PackageNode>{};
   final List<TransferInfo> _transferAssets = <TransferInfo>[];
@@ -18,7 +19,7 @@ class Project{
     return _newPackages.putIfAbsent(name, ()=>new PackageNode());
   }
 
-  Project(this._sourcePackages, this.packageGraph);
+  Project(this._sourcePackages, this.packageGraph, this.outputPackagesPath);
 
   void addTransferInfo(TransferInfo tInfo) {
     _transferAssets.add(tInfo);

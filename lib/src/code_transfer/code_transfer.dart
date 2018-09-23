@@ -67,7 +67,7 @@ class CodeTransfer{
       count = allFiles.length;
       sourcePackages[package] = new node.PackageNode();
     };
-    _project = new node.Project(sourcePackages, packageGraph);
+    _project = new node.Project(sourcePackages, packageGraph,path.join(path.dirname(packageGraph.root.path),'new_packages'));
     await _runForFiles(allFiles);
     await _execTransmutation();
     stopwatch.stop();
@@ -449,14 +449,7 @@ class CodeTransfer{
     Map<AssetId, List<AssetId>> directImportsByAssetId = {};
     Map<AssetId, List<AssetId>> exportsByAssetId = {};
     Map<AssetId, List<AssetId>> needImportsByAssetId = {};
-    for (var sPackage in _project.sourcePackages) {
-      var package = _project.getOrCreatePackage(sPackage);
-      package.files.forEach((fName, node) {
-        node.directImports.forEach((f) => directImportsByAssetId.putIfAbsent(f, () => <AssetId>[]).add(node.assetId));
-        node.exports.forEach((f) => exportsByAssetId.putIfAbsent(f, () => <AssetId>[]).add(node.assetId));
-        node.needImports.forEach((f) => needImportsByAssetId.putIfAbsent(f, () => <AssetId>[]).add(node.assetId));
-      });
-    }
+    _preparationDependencies(directImportsByAssetId, exportsByAssetId, needImportsByAssetId);
     Map<AssetId, List<Action>> actionsByFile = <AssetId, List<Action>>{};
     for (var transferInfo in _project.transferAssets) {
       var actions = actionsByFile.putIfAbsent(transferInfo.source, () {
@@ -466,33 +459,11 @@ class CodeTransfer{
       actions.add(new MoveFileAction(transferInfo.source, transferInfo.dest));
       var changeAssets = directImportsByAssetId[transferInfo.source];
       if (changeAssets != null) {
-        changeAssets.forEach((changeAsset) {
-          var list = actionsByFile.putIfAbsent(changeAsset, () {
-            _validateAsset(changeAsset);
-            return <Action>[];
-          });
-          ChangeImportAction action = list.firstWhere((action) => action is ChangeImportAction, orElse: () => null);
-          if (action == null) {
-            action = new ChangeImportAction();
-            list.add(action);
-          }
-          action.replace(transferInfo.source, transferInfo.dest);
-        });
+        _createChangeImportAction(changeAssets, actionsByFile, transferInfo);
       }
       changeAssets = exportsByAssetId[transferInfo.source];
       if (changeAssets != null) {
-        changeAssets.forEach((changeAsset) {
-          var list = actionsByFile.putIfAbsent(changeAsset, () {
-            _validateAsset(changeAsset);
-            return <Action>[];
-          });
-          ChangeExportAction action = list.firstWhere((action) => action is ChangeExportAction, orElse: () => null);
-          if (action == null) {
-            action = new ChangeExportAction();
-            list.add(action);
-          }
-          action.replace(transferInfo.source, transferInfo.dest);
-        });
+        _createChangeExportAction(changeAssets, actionsByFile, transferInfo);
       }
     }
     var totalActions = 0;
@@ -508,6 +479,67 @@ class CodeTransfer{
         action.execute(_project, assetId);
       });
     });
+  }
+
+  void _createChangeExportAction(List<AssetId> changeAssets, Map<AssetId, List<Action>> actionsByFile, node.TransferInfo transferInfo) {
+    changeAssets.forEach((changeAsset) {
+      List<Action> list = _getActionsByFile(actionsByFile, changeAsset);
+      var action = _getAction<ChangeExportAction>(list, new ChangeExportAction());
+      action.replace(transferInfo.source, transferInfo.dest);
+        _createChangePubspecAction(actionsByFile, transferInfo);
+    });
+  }
+
+  void _createChangeImportAction(List<AssetId> changeAssets, Map<AssetId, List<Action>> actionsByFile, node.TransferInfo transferInfo) {
+      changeAssets.forEach((changeAsset) {
+        List<Action> list = _getActionsByFile(actionsByFile, changeAsset);
+        var action = _getAction<ChangeImportAction>(list, new ChangeImportAction());
+        action.replace(transferInfo.source, transferInfo.dest);
+          _createChangePubspecAction(actionsByFile, transferInfo);
+      });
+
+  }
+
+  List<Action> _getActionsByFile(Map<AssetId, List<Action>> actionsByFile, AssetId changeAsset) {
+    var list = actionsByFile.putIfAbsent(changeAsset, () {
+      _validateAsset(changeAsset);
+      return <Action>[];
+    });
+    return list;
+  }
+
+  void _preparationDependencies(Map<AssetId, List<AssetId>> directImportsByAssetId, Map<AssetId, List<AssetId>> exportsByAssetId, Map<AssetId, List<AssetId>> needImportsByAssetId) {
+    for (var sPackage in _project.sourcePackages) {
+      var package = _project.getOrCreatePackage(sPackage);
+      package.files.forEach((fName, node) {
+        node.directImports.forEach((f) => directImportsByAssetId.putIfAbsent(f, () => <AssetId>[]).add(node.assetId));
+        node.exports.forEach((f) => exportsByAssetId.putIfAbsent(f, () => <AssetId>[]).add(node.assetId));
+        node.needImports.forEach((f) => needImportsByAssetId.putIfAbsent(f, () => <AssetId>[]).add(node.assetId));
+      });
+    }
+  }
+
+  T _getAction<T>(List<Action> list, Action defaultValue) {
+    Action action = list.firstWhere((action) => action is T, orElse: () => null);
+    if (action == null) {
+      action = defaultValue;
+      list.add(action);
+    }
+    return action as T;
+  }
+
+  void _createChangePubspecAction(Map<AssetId, List<Action>> actionsByFile, node.TransferInfo transferInfo) {
+    if (transferInfo.source.package == transferInfo.dest.package){
+      return;
+    }
+    AssetId pubspecId = new AssetId(transferInfo.source.package, 'pubspec.yaml');
+    List<Action> list = _getActionsByFile(actionsByFile, pubspecId);
+    ChangePubspec action = list.firstWhere((action) => action is ChangePubspec, orElse: () => null);
+    if (action == null) {
+      action = new ChangePubspec();
+      list.add(action);
+    }
+    action.addDependence(transferInfo.dest.package);
   }
 
 }

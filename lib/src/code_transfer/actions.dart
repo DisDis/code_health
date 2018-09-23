@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:yaml/yaml.dart' as yaml;
 import 'package:analyzer/analyzer.dart';
 import 'package:analyzer/dart/ast/standard_ast_factory.dart';
 import 'package:analyzer/dart/ast/token.dart';
@@ -73,4 +74,38 @@ class MoveFileAction extends Action{
   Future execute(Project project, AssetId assetId) async{
 
   }
+}
+
+class ChangePubspec extends Action{
+  final Set<String> newDependencies = new Set<String>();
+
+  void addDependence(String package){
+    newDependencies.add(package);
+  }
+
+  @override
+  Future execute(Project project, AssetId assetId) async{
+    var f = new File(path.join(project.packageGraph.allPackages[assetId.package].path,assetId.path));
+    var content = await f.readAsString();
+    yaml.YamlMap yamlMap = yaml.loadYaml(content);
+    var dependencies = yamlMap.nodes['dependencies'] as yaml.YamlMap;
+    newDependencies.removeWhere((package)=> dependencies.containsKey(package));
+    if (newDependencies.isNotEmpty) {
+      StringBuffer sb = new StringBuffer(content.substring(0, dependencies.span.end.offset));
+      sb.writeln();
+      var column = dependencies.nodes.keys.first.span.start.column;
+      newDependencies.forEach((packageName) {
+        var newPackagePath = path.join(project.outputPackagesPath, packageName);
+        var modPackagePath = path.relative(
+            newPackagePath, from: project.packageGraph.allPackages[assetId.package].path);
+        sb.writeln('${''.padLeft(column)}$packageName:');
+        sb.writeln('${''.padLeft(column + 3)}path: "${modPackagePath}"');
+      });
+      sb.writeln(content.substring(dependencies.span.end.offset));
+      await f.writeAsString(sb.toString());
+    }
+  }
+
+  final int priority = 9;
+
 }
