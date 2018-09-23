@@ -438,6 +438,9 @@ class CodeTransfer{
   }
 
   void _validateAsset(AssetId assetId){
+    if (_project.newPackages.contains(assetId.package)){
+      return;
+    }
     if (packageGraph.allPackages[assetId.package].dependencyType != DependencyType.path) {
       _log.severe('Package "${assetId.package}" not override, code_transfer can not modify "$assetId"');
       exit(-1);
@@ -545,6 +548,7 @@ class CodeTransfer{
       list.add(action);
     }
     action.addDependence(transferInfo.dest.package);
+    _project.getOrCreatePackage(transferInfo.dest.package);
   }
 
 }

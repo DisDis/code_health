@@ -51,7 +51,7 @@ class _ChangeExportImportAction extends Action {
     fileNode.compilationUnit = compilationUnit;
     var f = new File(path.join(project.packageGraph.allPackages[fileNode.assetId.package].path,fileNode.assetId.path));
     var source = fileNode.compilationUnit.toSource();
-    await f.writeAsString(dartFormatter.format(source));
+    f.writeAsStringSync(dartFormatter.format(source));
   }
 
 }
@@ -72,19 +72,19 @@ class MoveFileAction extends Action{
 
   @override
   Future execute(Project project, AssetId assetId) async{
-    var sourceFile = new File(path.join(project.packageGraph.allPackages[assetId.package].path,assetId.path));
+    var sourceFile = new File(path.join(project.packageGraph.allPackages[source.package].path,source.path));
     String destFilePath;
-    if (project.packageGraph.allPackages[assetId.package] != null){
-      destFilePath = path.join(project.packageGraph.allPackages[assetId.package].path,assetId.path);
+    if (project.packageGraph.allPackages[dest.package] != null){
+      destFilePath = path.join(project.packageGraph.allPackages[dest.package].path,dest.path);
     } else {
-      destFilePath = path.join(project.outputPackagesPath, assetId.package, assetId.path);
+      destFilePath = path.join(project.outputPackagesPath, dest.package, dest.path);
     }
     var destFile = new File(destFilePath);
     var destDir = new Directory(path.dirname(destFilePath));
     if (!destDir.existsSync()){
-      destDir.createSync();
+      destDir.createSync(recursive: true);
     }
-    await destFile.writeAsBytes(await sourceFile.readAsBytes());
+    destFile.writeAsBytesSync(sourceFile.readAsBytesSync());
     await sourceFile.delete();
   }
 }
@@ -115,7 +115,7 @@ class ChangePubspec extends Action{
         sb.writeln('${''.padLeft(column + 3)}path: "${modPackagePath}"');
       });
       sb.writeln(content.substring(dependencies.span.end.offset));
-      await f.writeAsString(sb.toString());
+      f.writeAsStringSync(sb.toString());
     }
   }
 
@@ -129,7 +129,7 @@ class CreatePubspecAction extends Action{
     var destDirStr = path.join(project.outputPackagesPath, assetId.package);
     var destDir = new Directory(destDirStr);
     if (!destDir.existsSync()) {
-      destDir.createSync();
+      destDir.createSync(recursive: true);
     }
     var destFile = new File(path.join(destDirStr,'pubspec.yaml'));
     if (!destFile.existsSync()){
