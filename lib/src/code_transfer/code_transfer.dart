@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 //import 'package:analyzer/dart/ast/visitor.dart';
+import 'package:analyzer/analyzer.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:build/build.dart';
 import 'package:build_resolvers/build_resolvers.dart';
@@ -9,10 +10,14 @@ import 'package:build_runner/build_runner.dart';
 import 'package:build_runner_core/build_runner_core.dart';
 import 'package:build_runner_core/src/asset/cache.dart';
 import 'package:code_health/code_transfer.dart';
+import 'package:code_health/src/code_transfer/actions.dart';
+import 'package:code_health/src/code_transfer/code_node.dart' as node;
 import 'package:code_health/src/code_transfer/work_result.dart';
+import 'package:code_health/src/common/resolver_helper.dart';
 //import 'package:code_health/src/common/directive_info.dart';
 //import 'package:code_health/src/common/directive_priority.dart';
 import 'package:code_health/src/common/visitor/exported_elements_visitor.dart';
+import 'package:code_health/src/common/visitor/used_imported_elements_visitor.dart';
 //import 'package:code_health/src/common/visitor/used_imported_elements_visitor.dart';
 import 'package:glob/glob.dart';
 //import 'package:analyzer/dart/ast/ast.dart';
@@ -20,10 +25,12 @@ import 'package:build_resolvers/src/resolver.dart';
 import 'package:build/src/builder/build_step_impl.dart';
 import 'package:analyzer/src/generated/resolver.dart';
 import 'package:logging/logging.dart' as log show Logger;
+import 'package:package_resolver/package_resolver.dart';
+import 'package:analyzer/src/generated/engine.dart';
 
 class CodeTransfer{
   static final log.Logger _log = new log.Logger('CodeTransfer');
-  static final _resolvers = new AnalyzerResolvers();
+  static final _resolvers = new AnalyzerResolvers(new AnalysisOptionsImpl()..preserveComments = true);
   static final packageGraph = new PackageGraph.forThisPackage();
 
   final io = new IOEnvironment(packageGraph, assumeTty:true);
@@ -31,33 +38,63 @@ class CodeTransfer{
   final WorkResult _workResult;
   CachingAssetReader _reader;
   final Settings settings;
+  node.Project _project;
 
 
   CodeTransfer(Settings settings): this.settings = settings, _workResult = new WorkResult(settings);
 
-  runForPackage(String package) async {
-    _log.info("Target package: '$package'");
-    var assets = (await io.reader.findAssets(new Glob('lib/**.dart'), package: package).toList()).map((item)=>item.toString())
-        .toList();
-    runForFiles(assets);
+  run() async {
+    _log.info('Run');
+    var stopwatch = new Stopwatch()..start();
+    final Map<String, node.PackageNode> sourcePackages = <String, node.PackageNode>{};
+    _log.info('Total packages: ${packageGraph.allPackages.length}');
+    var allFiles = <AssetId> [];
+    var count = 0;
+    for(var package in packageGraph.allPackages.keys) {
+      if (package == '\$sdk'){
+        continue;
+      }
+      try {
+        allFiles.addAll(await io.reader.findAssets(new Glob('lib/**.dart'), package: package).toList());
+      } catch (e) {}
+      try {
+        allFiles.addAll(await io.reader.findAssets(new Glob('test/**.dart'), package: package).toList());
+      } catch (e) {}
+      try {
+        allFiles.addAll(await io.reader.findAssets(new Glob('bin/**.dart'), package: package).toList());
+      } catch (e) {}
+      _log.info("  '$package' (${allFiles.length - count})");
+      count = allFiles.length;
+      sourcePackages[package] = new node.PackageNode();
+    };
+    _project = new node.Project(sourcePackages, packageGraph,path.join(path.dirname(packageGraph.root.path),'new_packages'));
+    await _runForFiles(allFiles);
+    await _execTransmutation();
+    stopwatch.stop();
+    _log.info('Time: ${stopwatch.elapsed.toString()}');
   }
 
-  runForFiles(Iterable<String> inputs) async {
+  _runForFiles(Iterable<AssetId> inputs) async {
     var count = inputs.length;
     _log.info('Total files: $count');
     _reader = new CachingAssetReader(io.reader);
     var index = 0;
     for (var input in inputs) {
       index++;
-      _log.info('$index/$count $input');
+      _log.info('${index.toString().padLeft(6)}/$count $input');
       await _parseInput(input);
     }
-    _log.info('Optimization completed');
-    _showReport();
+    _log.info('Parsing completed');
+//    _showReport();
   }
 
-  Future _parseInput(String input) async {
-    /*var inputId = new AssetId.parse(input);
+  static const String _annotationName = 'CHTransfer';
+  static const String _annotationPackageParam = 'package';
+  static const String _annotationExportParam = 'export';
+  static const String _annotationDestParam = 'dest';
+
+
+  Future _parseInput(AssetId inputId) async {
     var buildStep = new BuildStepImpl(
         inputId,
         [],
@@ -73,33 +110,47 @@ class CodeTransfer{
       lib.unit.accept(usedImportedElementsVisitor);
       var usedElements = _getUsedElements(usedImportedElementsVisitor.usedElements);
       var optLibraries = await _getLibrariesForElemets(inputId, usedElements, resolver);
-      var output = _generateImportText(inputId, lib, optLibraries);
-      if (output.isNotEmpty) {
-        final stat = _workResult.statistics[inputId];
-        print('// FileName: "$inputId"  unique old: ${stat.sourceNode} -> new: ${stat.optNode}, agg old: ${stat.sourceAggNode} -> new: ${stat.optAggNode}');
-        print(output);
-        if (settings.applyImports) {
-          final firstImport = lib.unit.directives.firstWhere((dir) => dir.keyword.keyword == Keyword.IMPORT);
-          final lastImport = lib.unit.directives.lastWhere((dir) => dir.keyword.keyword == Keyword.IMPORT);
+      var packageNode = _project.getOrCreatePackage(inputId.package);
+      var fileNode = _libraryElementToFileNode(inputId, lib, optLibraries);
+//      parseCompilationUnit(lib.source.contents.data)
+      packageNode.files[inputId] = fileNode;
 
-          _replaceImportsInFile(inputId.path, output, firstImport.firstTokenAfterCommentAndMetadata.charOffset,
-              lastImport.endToken.charOffset);
+
+      for (var declaration in lib.unit.declarations) {
+          var annotation = ResolverHelper.getAnnotation(declaration, _annotationName);
+          if (annotation != null){
+            fileNode.transferAssetId = _annotationToAssetId(inputId, annotation);
+          }
+      }
+      for (var declaration in lib.unit.directives) {
+        var annotation = ResolverHelper.getAnnotation(declaration, _annotationName);
+        if (annotation != null){
+          fileNode.transferAssetId = _annotationToAssetId(inputId, annotation);
         }
       }
+      if (fileNode.transferAssetId != null && fileNode.transferAssetId != fileNode.assetId){
+//        _log.info('${fileNode.assetId} -> ${fileNode.transferAssetId}');
+        _project.addTransferInfo(new node.TransferInfo(fileNode.assetId, fileNode.transferAssetId));
+      }
+
+      
+
+//      var output = _generateImportText(inputId, lib, optLibraries);
+//      if (output.isNotEmpty) {
+//        final stat = _workResult.statistics[inputId];
+//        print('// FileName: "$inputId"  unique old: ${stat.sourceNode} -> new: ${stat.optNode}, agg old: ${stat.sourceAggNode} -> new: ${stat.optAggNode}');
+//        print(output);
+//        if (settings.applyImports) {
+//          final firstImport = lib.unit.directives.firstWhere((dir) => dir.keyword.keyword == Keyword.IMPORT);
+//          final lastImport = lib.unit.directives.lastWhere((dir) => dir.keyword.keyword == Keyword.IMPORT);
+//
+//          _replaceImportsInFile(inputId.path, output, firstImport.firstTokenAfterCommentAndMetadata.charOffset,
+//              lastImport.endToken.charOffset);
+//        }
+//      }
     } catch(e,st){
       _log.fine("Skip '$inputId'", e, st);
-    }*/
-  }
-
-  void _replaceImportsInFile(String filename, String newImports, int fromOffset, int toOffset) {
-    final fullname = path.join('.', filename);
-    final str = new File(fullname).readAsStringSync();
-    final res = new StringBuffer();
-    res.write(str.substring(0, fromOffset));
-    res.writeln(newImports);
-    res.write(str.substring(toOffset+1).trimLeft());
-    new File(fullname).writeAsStringSync(res.toString());
-    _log.info("File '$fullname' patched!");
+    }
   }
 
 
@@ -131,7 +182,7 @@ class CodeTransfer{
   }
 
   Future<Iterable<LibraryElement>> _getLibrariesForElemets(AssetId inputId, Iterable<Element> elements, Resolver resolver) async {
-    /*var libraries = new Map<LibraryElement, List<Element>>();
+    var libraries = new Map<LibraryElement, List<Element>>();
     for (var element in elements) {
       var source = element.source;
       var library = element.library;
@@ -140,11 +191,11 @@ class CodeTransfer{
         var assetId = source.assetId;
 
         if (assetId.package != inputId.package && source.assetId.path.contains('/src/')){
-          if (settings.allowSrcImport){
+//          if (settings.allowSrcImport){
             optLibrary = library;
-          } else {
-            optLibrary = await _getOptimumLibraryWhichExportsElement(element, resolver);
-          }
+//          } else {
+//            optLibrary = await _getOptimumLibraryWhichExportsElement(element, resolver);
+//          }
         }
       }
       if (libraries.containsKey(optLibrary)) {
@@ -157,19 +208,19 @@ class CodeTransfer{
     }
     // Remove library if another library exports all entities from this library which we use
     var unnecessaryDependentLibraries = new Set<LibraryElement>();
-    if (!settings.allowUnnecessaryDependenciesImports) {
-      for (var library in libraries.keys) {
-        var elementsImportedFromLibrary = libraries[library];
-        for (var anotherLibrary in libraries.keys) {
-          if (library != anotherLibrary) {
-            if (elementsImportedFromLibrary.every((element) => _isLibraryExportsElement(anotherLibrary, element))) {
-              unnecessaryDependentLibraries.add(library);
-            }
-          }
-        }
-      }
-    }
-    return libraries.keys.where((lib)=> !unnecessaryDependentLibraries.contains(lib));*/
+//    if (!settings.allowUnnecessaryDependenciesImports) {
+//      for (var library in libraries.keys) {
+//        var elementsImportedFromLibrary = libraries[library];
+//        for (var anotherLibrary in libraries.keys) {
+//          if (library != anotherLibrary) {
+//            if (elementsImportedFromLibrary.every((element) => _isLibraryExportsElement(anotherLibrary, element))) {
+//              unnecessaryDependentLibraries.add(library);
+//            }
+//          }
+//        }
+//      }
+//    }
+    return libraries.keys.where((lib)=> !unnecessaryDependentLibraries.contains(lib));
   }
 
   Future<LibraryElement> _getOptimumLibraryWhichExportsElement(Element element, Resolver resolverI) async {
@@ -344,6 +395,160 @@ class CodeTransfer{
     return importedLibraries.any((library) {
       return library.hasDeprecated;
     });
+  }
+
+  node.FileNode _libraryElementToFileNode(AssetId assetId, LibraryElement lib, Iterable<LibraryElement> optLibraries) {
+    var fNode = new node.FileNode(assetId, lib.unit);
+    for (var part in lib.parts) {
+      var source = part.source;
+      if (source is AssetBasedSource) {
+        fNode.parts.add(source.assetId);
+      }
+    }
+    for (var library in lib.importedLibraries) {
+      var source = library.source;
+      if (source is AssetBasedSource) {
+        fNode.directImports.add(source.assetId);
+      }
+    }
+    for (var library in lib.exportedLibraries) {
+      var source = library.source;
+      if (source is AssetBasedSource) {
+        fNode.exports.add(source.assetId);
+      }
+    }
+    for (var library in optLibraries) {
+      var source = library.source;
+      if (source is AssetBasedSource) {
+        fNode.needImports.add(source.assetId);
+      }
+    }
+    return fNode;
+  }
+
+  AssetId _annotationToAssetId(AssetId assetId, Annotation annotation) {
+    AssetId result = assetId;
+    var newDest = ResolverHelper.getAnnotationStrParameter(annotation, _annotationDestParam);
+    var newPackage = ResolverHelper.getAnnotationStrParameter(annotation, _annotationPackageParam);
+    result = new AssetId(newPackage != null ? newPackage : assetId.package, newDest != null ? path.join('lib', newDest) : assetId.path);
+//    if (result.path == assetId.path && result.package == assetId.package){
+//      return null;
+//    }
+    return result;
+  }
+
+  void _validateAsset(AssetId assetId){
+    if (_project.newPackages.contains(assetId.package)){
+      return;
+    }
+    if (packageGraph.allPackages[assetId.package].dependencyType != DependencyType.path) {
+      _log.severe('Package "${assetId.package}" not override, code_transfer can not modify "$assetId"');
+      exit(-1);
+    }
+  }
+
+  _execTransmutation() async {
+    _log.info('Start transmutation...');
+    Map<AssetId, List<AssetId>> directImportsByAssetId = {};
+    Map<AssetId, List<AssetId>> exportsByAssetId = {};
+    Map<AssetId, List<AssetId>> needImportsByAssetId = {};
+    _preparationDependencies(directImportsByAssetId, exportsByAssetId, needImportsByAssetId);
+    Map<AssetId, List<Action>> actionsByFile = <AssetId, List<Action>>{};
+    for (var transferInfo in _project.transferAssets) {
+      var actions = actionsByFile.putIfAbsent(transferInfo.source, () {
+        _validateAsset(transferInfo.source);
+        return <Action>[];
+      });
+      actions.add(new MoveFileAction(transferInfo.source, transferInfo.dest));
+      var changeAssets = directImportsByAssetId[transferInfo.source];
+      if (changeAssets != null) {
+        _createChangeImportAction(changeAssets, actionsByFile, transferInfo);
+      }
+      changeAssets = exportsByAssetId[transferInfo.source];
+      if (changeAssets != null) {
+        _createChangeExportAction(changeAssets, actionsByFile, transferInfo);
+      }
+    }
+    _project.newPackages.forEach((newPackageName){
+      var newPackageId = new AssetId(newPackageName, 'pubspec.yaml');
+      List<Action> list = _getActionsByFile(actionsByFile, newPackageId);
+      list.add(new CreatePubspecAction());
+    });
+    var totalActions = 0;
+    for (var actions in actionsByFile.values) {
+      totalActions += actions.length;
+    }
+    var currentAction = 0;
+    actionsByFile.forEach((assetId, actions) {
+      actions.sort((x, y) => x.priority.compareTo(y.priority));
+      actions.forEach((action) {
+        currentAction++;
+        _log.info("${currentAction.toString().padLeft(6)}/${totalActions} ${action} -> ${assetId}");
+        action.execute(_project, assetId);
+      });
+    });
+  }
+
+  void _createChangeExportAction(List<AssetId> changeAssets, Map<AssetId, List<Action>> actionsByFile, node.TransferInfo transferInfo) {
+    changeAssets.forEach((changeAsset) {
+      List<Action> list = _getActionsByFile(actionsByFile, changeAsset);
+      var action = _getAction<ChangeExportAction>(list, new ChangeExportAction());
+      action.replace(transferInfo.source, transferInfo.dest);
+        _createChangePubspecAction(actionsByFile, transferInfo);
+    });
+  }
+
+  void _createChangeImportAction(List<AssetId> changeAssets, Map<AssetId, List<Action>> actionsByFile, node.TransferInfo transferInfo) {
+      changeAssets.forEach((changeAsset) {
+        List<Action> list = _getActionsByFile(actionsByFile, changeAsset);
+        var action = _getAction<ChangeImportAction>(list, new ChangeImportAction());
+        action.replace(transferInfo.source, transferInfo.dest);
+          _createChangePubspecAction(actionsByFile, transferInfo);
+      });
+
+  }
+
+  List<Action> _getActionsByFile(Map<AssetId, List<Action>> actionsByFile, AssetId changeAsset) {
+    var list = actionsByFile.putIfAbsent(changeAsset, () {
+      _validateAsset(changeAsset);
+      return <Action>[];
+    });
+    return list;
+  }
+
+  void _preparationDependencies(Map<AssetId, List<AssetId>> directImportsByAssetId, Map<AssetId, List<AssetId>> exportsByAssetId, Map<AssetId, List<AssetId>> needImportsByAssetId) {
+    for (var sPackage in _project.sourcePackages) {
+      var package = _project.getOrCreatePackage(sPackage);
+      package.files.forEach((fName, node) {
+        node.directImports.forEach((f) => directImportsByAssetId.putIfAbsent(f, () => <AssetId>[]).add(node.assetId));
+        node.exports.forEach((f) => exportsByAssetId.putIfAbsent(f, () => <AssetId>[]).add(node.assetId));
+        node.needImports.forEach((f) => needImportsByAssetId.putIfAbsent(f, () => <AssetId>[]).add(node.assetId));
+      });
+    }
+  }
+
+  T _getAction<T>(List<Action> list, Action defaultValue) {
+    Action action = list.firstWhere((action) => action is T, orElse: () => null);
+    if (action == null) {
+      action = defaultValue;
+      list.add(action);
+    }
+    return action as T;
+  }
+
+  void _createChangePubspecAction(Map<AssetId, List<Action>> actionsByFile, node.TransferInfo transferInfo) {
+    if (transferInfo.source.package == transferInfo.dest.package){
+      return;
+    }
+    AssetId pubspecId = new AssetId(transferInfo.source.package, 'pubspec.yaml');
+    List<Action> list = _getActionsByFile(actionsByFile, pubspecId);
+    ChangePubspec action = list.firstWhere((action) => action is ChangePubspec, orElse: () => null);
+    if (action == null) {
+      action = new ChangePubspec();
+      list.add(action);
+    }
+    action.addDependence(transferInfo.dest.package);
+    _project.getOrCreatePackage(transferInfo.dest.package);
   }
 
 }
