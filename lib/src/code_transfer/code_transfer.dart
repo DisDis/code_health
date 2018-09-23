@@ -466,6 +466,11 @@ class CodeTransfer{
         _createChangeExportAction(changeAssets, actionsByFile, transferInfo);
       }
     }
+    _project.newPackages.forEach((newPackageName){
+      var newPackageId = new AssetId(newPackageName, 'pubspec.yaml');
+      List<Action> list = _getActionsByFile(actionsByFile, newPackageId);
+      list.add(new CreatePubspecAction());
+    });
     var totalActions = 0;
     for (var actions in actionsByFile.values) {
       totalActions += actions.length;

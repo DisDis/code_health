@@ -122,3 +122,31 @@ class ChangePubspec extends Action{
   final int priority = 9;
 
 }
+
+class CreatePubspecAction extends Action{
+  @override
+  Future execute(Project project, AssetId assetId) async {
+    var destDirStr = path.join(project.outputPackagesPath, assetId.package);
+    var destDir = new Directory(destDirStr);
+    if (!destDir.existsSync()) {
+      destDir.createSync();
+    }
+    var destFile = new File(path.join(destDirStr,'pubspec.yaml'));
+    if (!destFile.existsSync()){
+     destFile.writeAsStringSync(
+"""name: ${assetId.package}
+description: Library ${assetId.package}
+version: 1.0.0
+
+environment:
+  sdk: '>=2.0.0 <3.0.0'
+
+dependencies:
+""");
+    }
+  }
+
+  @override
+  int get priority => 8;
+
+}
