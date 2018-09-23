@@ -72,7 +72,20 @@ class MoveFileAction extends Action{
 
   @override
   Future execute(Project project, AssetId assetId) async{
-
+    var sourceFile = new File(path.join(project.packageGraph.allPackages[assetId.package].path,assetId.path));
+    String destFilePath;
+    if (project.packageGraph.allPackages[assetId.package] != null){
+      destFilePath = path.join(project.packageGraph.allPackages[assetId.package].path,assetId.path);
+    } else {
+      destFilePath = path.join(project.outputPackagesPath, assetId.package, assetId.path);
+    }
+    var destFile = new File(destFilePath);
+    var destDir = new Directory(path.dirname(destFilePath));
+    if (!destDir.existsSync()){
+      destDir.createSync();
+    }
+    await destFile.writeAsBytes(await sourceFile.readAsBytes());
+    await sourceFile.delete();
   }
 }
 
