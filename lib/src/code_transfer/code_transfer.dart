@@ -40,6 +40,7 @@ class CodeTransfer{
   final Settings settings;
   node.Project _project;
 
+  final List<String> _excludePackages = ['\$sdk', 'front_end', 'barback', 'analyzer', 'front_end', 'kernel', 'yaml'];
 
   CodeTransfer(Settings settings): this.settings = settings, _workResult = new WorkResult(settings);
 
@@ -51,7 +52,8 @@ class CodeTransfer{
     var allFiles = <AssetId> [];
     var count = 0;
     for(var package in packageGraph.allPackages.keys) {
-      if (package == '\$sdk'){
+      if (_excludePackages.contains(package)){
+        _log.info("  '$package' skip");
         continue;
       }
       try {
@@ -91,7 +93,8 @@ class CodeTransfer{
   static const String _annotationName = 'CHTransfer';
   static const String _annotationPackageParam = 'package';
   static const String _annotationExportParam = 'export';
-  static const String _annotationDestParam = 'dest';
+  static const String _annotationDestDirectory = 'directory';
+  static const String _annotationDestFilename = 'filename';
 
 
   Future _parseInput(AssetId inputId) async {
@@ -428,9 +431,16 @@ class CodeTransfer{
 
   AssetId _annotationToAssetId(AssetId assetId, Annotation annotation) {
     AssetId result = assetId;
-    var newDest = ResolverHelper.getAnnotationStrParameter(annotation, _annotationDestParam);
+    var newDirectory = ResolverHelper.getAnnotationStrParameter(annotation, _annotationDestDirectory);
+    var newFilename = ResolverHelper.getAnnotationStrParameter(annotation, _annotationDestFilename);
     var newPackage = ResolverHelper.getAnnotationStrParameter(annotation, _annotationPackageParam);
-    result = new AssetId(newPackage != null ? newPackage : assetId.package, newDest != null ? path.join('lib', newDest) : assetId.path);
+    if (newFilename == null) {
+      newFilename = path.basename(assetId.path);
+    }
+    if (newDirectory == null) {
+      newDirectory = path.dirname(assetId.path);
+    }
+    result = new AssetId(newPackage != null ? newPackage : assetId.package, path.join('lib', newDirectory, newFilename));
 //    if (result.path == assetId.path && result.package == assetId.package){
 //      return null;
 //    }
