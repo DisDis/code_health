@@ -439,8 +439,10 @@ class CodeTransfer{
     }
     if (newDirectory == null) {
       newDirectory = path.dirname(assetId.path);
+    } else {
+      newDirectory = path.join('lib', newDirectory);
     }
-    result = new AssetId(newPackage != null ? newPackage : assetId.package, path.join('lib', newDirectory, newFilename));
+    result = new AssetId(newPackage != null ? newPackage : assetId.package, path.join(newDirectory, newFilename));
 //    if (result.path == assetId.path && result.package == assetId.package){
 //      return null;
 //    }
