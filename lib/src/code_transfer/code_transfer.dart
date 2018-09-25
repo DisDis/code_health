@@ -90,10 +90,10 @@ class CodeTransfer{
 //    _showReport();
   }
 
-  static const String _annotationName = 'CHTransfer';
-  static const String _annotationPackageParam = 'package';
+  static const String annotationName = 'CHTransfer';
+  static const String annotationPackageParam = 'package';
   static const String _annotationExportParam = 'export';
-  static const String _annotationDestDirectory = 'directory';
+  static const String annotationDestDirectory = 'directory';
   static const String _annotationDestFilename = 'filename';
 
 
@@ -120,13 +120,13 @@ class CodeTransfer{
 
 
       for (var declaration in lib.unit.declarations) {
-          var annotation = ResolverHelper.getAnnotation(declaration, _annotationName);
+          var annotation = ResolverHelper.getAnnotation(declaration, annotationName);
           if (annotation != null){
             fileNode.transferAssetId = _annotationToAssetId(inputId, annotation);
           }
       }
       for (var declaration in lib.unit.directives) {
-        var annotation = ResolverHelper.getAnnotation(declaration, _annotationName);
+        var annotation = ResolverHelper.getAnnotation(declaration, annotationName);
         if (annotation != null){
           fileNode.transferAssetId = _annotationToAssetId(inputId, annotation);
         }
@@ -431,9 +431,9 @@ class CodeTransfer{
 
   AssetId _annotationToAssetId(AssetId assetId, Annotation annotation) {
     AssetId result = assetId;
-    var newDirectory = ResolverHelper.getAnnotationStrParameter(annotation, _annotationDestDirectory);
+    var newDirectory = ResolverHelper.getAnnotationStrParameter(annotation, annotationDestDirectory);
     var newFilename = ResolverHelper.getAnnotationStrParameter(annotation, _annotationDestFilename);
-    var newPackage = ResolverHelper.getAnnotationStrParameter(annotation, _annotationPackageParam);
+    var newPackage = ResolverHelper.getAnnotationStrParameter(annotation, annotationPackageParam);
     if (newFilename == null) {
       newFilename = path.basename(assetId.path);
     }
