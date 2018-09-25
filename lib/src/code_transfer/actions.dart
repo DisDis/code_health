@@ -71,21 +71,37 @@ class MoveFileAction extends Action{
   MoveFileAction(this.source, this.dest);
 
   @override
-  Future execute(Project project, AssetId assetId) async{
-    var sourceFile = new File(path.join(project.packageGraph.allPackages[source.package].path,source.path));
+  Future execute(Project project, AssetId assetId) async {
+    final packagePath = project.packageGraph.allPackages[source.package].path;
+    var sourceFile = new File(path.join(packagePath, source.path));
     String destFilePath;
-    if (project.packageGraph.allPackages[dest.package] != null){
-      destFilePath = path.join(project.packageGraph.allPackages[dest.package].path,dest.path);
+    if (project.packageGraph.allPackages[dest.package] != null) {
+      destFilePath = path.join(project.packageGraph.allPackages[dest.package].path, dest.path);
     } else {
       destFilePath = path.join(project.outputPackagesPath, dest.package, dest.path);
     }
     var destFile = new File(destFilePath);
     var destDir = new Directory(path.dirname(destFilePath));
-    if (!destDir.existsSync()){
+    if (!destDir.existsSync()) {
       destDir.createSync(recursive: true);
     }
     destFile.writeAsBytesSync(sourceFile.readAsBytesSync());
-    await sourceFile.delete();
+    sourceFile.deleteSync();
+    _movePartFiles(project, destFilePath);
+  }
+
+  void _movePartFiles(Project project, String destFilePath) {
+    final packagePath = project.packageGraph.allPackages[source.package].path;
+    var package = project.getOrCreatePackage(source.package);
+    var fileNode = package.files[source];
+    if (fileNode.parts.isNotEmpty) {
+      fileNode.parts.forEach((partFile) {
+        var sourceFile = new File(path.join(packagePath, partFile.path));
+        var destFile = new File(path.join(path.dirname(destFilePath), path.basename(partFile.path)));
+        destFile.writeAsBytesSync(sourceFile.readAsBytesSync());
+        sourceFile.deleteSync();
+      });
+    }
   }
 }
 
