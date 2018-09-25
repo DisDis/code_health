@@ -94,7 +94,7 @@ class CodeTransferAnnotationMarker{
       sb.write(': \'${package}\',');
     }
     sb.write(CodeTransfer.annotationDestDirectory);
-    sb.write(': \'${path.join(directory,path.dirname(filePath))}\'');
+    sb.write(': \'${path.normalize(path.join(directory,path.dirname(filePath)))}\'');
 
     sb.writeln(')');
     sb.writeln(content.substring(lastImportIndex));
