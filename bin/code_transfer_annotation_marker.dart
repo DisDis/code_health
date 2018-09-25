@@ -76,11 +76,11 @@ class CodeTransferAnnotationMarker{
     if (startBodyIndex != -1) {
       searchContent = content.substring(0, startBodyIndex);
     }
-    var startLibraryIndex = searchContent.indexOf('^library ');
+    var startLibraryIndex = searchContent.indexOf('library ');
     if (startLibraryIndex == -1) {
       startLibraryIndex = 0;
     } else {
-      startLibraryIndex = searchContent.indexOf('\n', startLibraryIndex + 1);
+      startLibraryIndex = searchContent.indexOf('\n', startLibraryIndex + 1) + 1;
     }
     var lastImportIndex = searchContent.lastIndexOf('import ');
     if (lastImportIndex == -1) {
@@ -94,7 +94,7 @@ class CodeTransferAnnotationMarker{
       sb.write(': \'${package}\',');
     }
     sb.write(CodeTransfer.annotationDestDirectory);
-    sb.write(': \'${path.normalize(path.join(directory,path.dirname(filePath)))}\'');
+    sb.write(': \'${path.normalize(path.join(directory, path.dirname(filePath)))}\'');
 
     sb.writeln(')');
     sb.writeln(content.substring(lastImportIndex));
