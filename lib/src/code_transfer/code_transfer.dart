@@ -60,6 +60,9 @@ class CodeTransfer{
         allFiles.addAll(await io.reader.findAssets(new Glob('lib/**.dart'), package: package).toList());
       } catch (e) {}
       try {
+        allFiles.addAll(await io.reader.findAssets(new Glob('web/**.dart'), package: package).toList());
+      } catch (e) {}
+      try {
         allFiles.addAll(await io.reader.findAssets(new Glob('test/**.dart'), package: package).toList());
       } catch (e) {}
       try {
