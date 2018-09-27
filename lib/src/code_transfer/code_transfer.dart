@@ -40,8 +40,6 @@ class CodeTransfer{
   final Settings settings;
   node.Project _project;
 
-  final List<String> _excludePackages = ['\$sdk', 'front_end', 'barback', 'analyzer', 'front_end', 'kernel', 'yaml'];
-
   CodeTransfer(Settings settings): this.settings = settings, _workResult = new WorkResult(settings);
 
   run() async {
@@ -52,7 +50,7 @@ class CodeTransfer{
     var allFiles = <AssetId> [];
     var count = 0;
     for(var package in packageGraph.allPackages.keys) {
-      if (_excludePackages.contains(package)){
+      if (settings.excludePackages.contains(package)){
         _log.info("  '$package' skip");
         continue;
       }
@@ -464,10 +462,10 @@ class CodeTransfer{
   List<String> _errorLog = <String>[];
   void _addError(String message){
     if (_errorLog.isEmpty){
-      _log.severe('--------------------- ERROR ---------------------');
+      _log.severe('--------------------- First ERROR ---------------------');
+      _log.severe(message);
     }
     _errorLog.add(message);
-    _log.severe(message);
   }
 
   _execTransmutation() async {
@@ -505,10 +503,19 @@ class CodeTransfer{
       totalActions += actions.length;
     }
     if (_errorLog.isNotEmpty){
+      _log.severe('Transmutation interrupt');
+      _log.warning('     -------------------------------');
       _log.severe('Please fix all(${_errorLog.length}) errors or change settings');
       _errorLog.forEach(_log.severe);
-      _log.info('Transmutation interrupt');
+      _log.warning('     -------------------------------');
+      if (_fixCode.isNotEmpty){
+        _log.warning('---- Fix Code ----');
+        _fixCode.forEach(_log.warning);
+      }
       return;
+    }
+    if (settings.onlySimulation){
+      _log.info('onlySimulation=true; All ok');
     }
     var currentAction = 0;
     actionsByFile.forEach((assetId, actions) {
@@ -539,7 +546,7 @@ class CodeTransfer{
     var isSrcDest = transferInfo.dest.path.contains('/src/');
     if (exportAssetId == null && settings.forceExportFile){
       if (isSrcDest){
-        _addError('forceExportFile=true; File "${transferInfo.source}" move to "${transferInfo.source}" not exported');
+        _addError('forceExportFile=true; File "${transferInfo.source}" move to "${transferInfo.dest}" not exported');
         return;
       }
     }
@@ -563,7 +570,10 @@ class CodeTransfer{
         _createChangePubspecAction(actionsByFile, transferInfo);
       });
     if (!settings.allowSrcImport && isSrcDest && exportAssetId == null && hasUsedOtherPackage){
-      _addError('allowSrcImport=false; File "${transferInfo.source}" move to "${transferInfo.source}" not exported and used other packages');
+      _addError('allowSrcImport=false; File "${transferInfo.source}" move to "${transferInfo.dest}" not exported and used other packages');
+      if (settings.generateFixCode){
+        _addFixCode('export \'package:${transferInfo.source.package}${transferInfo.source.path.substring(3)}\';');
+      }
     }
   }
 
@@ -608,6 +618,11 @@ class CodeTransfer{
     }
     action.addDependence(transferInfo.dest.package);
     _project.getOrCreatePackage(transferInfo.dest.package);
+  }
+
+  List<String> _fixCode = <String>[];
+  void _addFixCode(String fixCode) {
+    _fixCode.add(fixCode);
   }
 
 }
