@@ -457,13 +457,22 @@ class CodeTransfer{
       return;
     }
     if (packageGraph.allPackages[assetId.package].dependencyType != DependencyType.path) {
-      _log.severe('Package "${assetId.package}" not override, code_transfer can not modify "$assetId"');
-      exit(-1);
+      _addError('Package "${assetId.package}" not override, code_transfer can not modify "$assetId"');
     }
+  }
+
+  List<String> _errorLog = <String>[];
+  void _addError(String message){
+    if (_errorLog.isEmpty){
+      _log.severe('--------------------- ERROR ---------------------');
+    }
+    _errorLog.add(message);
+    _log.severe(message);
   }
 
   _execTransmutation() async {
     _log.info('Start transmutation...');
+    _errorLog.clear();
     Map<AssetId, List<AssetId>> directImportsByAssetId = {};
     Map<AssetId, List<AssetId>> exportsByAssetId = {};
     Map<AssetId, List<AssetId>> needImportsByAssetId = {};
@@ -475,13 +484,15 @@ class CodeTransfer{
         return <Action>[];
       });
       actions.add(new MoveFileAction(transferInfo.source, transferInfo.dest));
+      var changeExportAssets = exportsByAssetId[transferInfo.source];
+      AssetId exportAssetId;
+      if (changeExportAssets != null) {
+        _createChangeExportAction(changeExportAssets, actionsByFile, transferInfo);
+        exportAssetId = changeExportAssets.first;
+      }
       var changeAssets = directImportsByAssetId[transferInfo.source];
       if (changeAssets != null) {
-        _createChangeImportAction(changeAssets, actionsByFile, transferInfo);
-      }
-      changeAssets = exportsByAssetId[transferInfo.source];
-      if (changeAssets != null) {
-        _createChangeExportAction(changeAssets, actionsByFile, transferInfo);
+        _createChangeImportAction(changeAssets, exportAssetId, actionsByFile, transferInfo);
       }
     }
     _project.newPackages.forEach((newPackageName){
@@ -492,6 +503,12 @@ class CodeTransfer{
     var totalActions = 0;
     for (var actions in actionsByFile.values) {
       totalActions += actions.length;
+    }
+    if (_errorLog.isNotEmpty){
+      _log.severe('Please fix all(${_errorLog.length}) errors or change settings');
+      _errorLog.forEach(_log.severe);
+      _log.info('Transmutation interrupt');
+      return;
     }
     var currentAction = 0;
     actionsByFile.forEach((assetId, actions) {
@@ -505,22 +522,49 @@ class CodeTransfer{
   }
 
   void _createChangeExportAction(List<AssetId> changeAssets, Map<AssetId, List<Action>> actionsByFile, node.TransferInfo transferInfo) {
+    if (!settings.allowMultiExport && changeAssets.length > 1) {
+      StringBuffer sb = new StringBuffer();
+      changeAssets.forEach((item){ sb.write('"${item.toString()}"'); sb.writeln();});
+      _addError('"${transferInfo.source}" exported[${changeAssets.length}] from ${sb}');
+    }
     changeAssets.forEach((changeAsset) {
       List<Action> list = _getActionsByFile(actionsByFile, changeAsset);
       var action = _getAction<ChangeExportAction>(list, new ChangeExportAction());
       action.replace(transferInfo.source, transferInfo.dest);
-        _createChangePubspecAction(actionsByFile, transferInfo);
+      _createChangePubspecAction(actionsByFile, transferInfo);
     });
   }
 
-  void _createChangeImportAction(List<AssetId> changeAssets, Map<AssetId, List<Action>> actionsByFile, node.TransferInfo transferInfo) {
-      changeAssets.forEach((changeAsset) {
+  void _createChangeImportAction(List<AssetId> changeAssets, AssetId exportAssetId, Map<AssetId, List<Action>> actionsByFile, node.TransferInfo transferInfo) {
+    var isSrcDest = transferInfo.dest.path.contains('/src/');
+    if (exportAssetId == null && settings.forceExportFile){
+      if (isSrcDest){
+        _addError('forceExportFile=true; File "${transferInfo.source}" move to "${transferInfo.source}" not exported');
+        return;
+      }
+    }
+    var dest = transferInfo.dest;
+    if (!settings.allowSrcImport && isSrcDest && exportAssetId != null){
+      // get moved export file
+      dest = _project.getDestAsset(exportAssetId);
+    }
+    var hasUsedOtherPackage = false;
+    changeAssets.forEach((changeAsset) {
         List<Action> list = _getActionsByFile(actionsByFile, changeAsset);
         var action = _getAction<ChangeImportAction>(list, new ChangeImportAction());
-        action.replace(transferInfo.source, transferInfo.dest);
-          _createChangePubspecAction(actionsByFile, transferInfo);
+        if(exportAssetId == changeAsset){
+          action.replace(transferInfo.source, transferInfo.dest);
+        } else {
+          action.replace(transferInfo.source, dest);
+          if (!settings.allowSrcImport && isSrcDest && transferInfo.dest.package != _project.getDestAsset(changeAsset).package ){
+            hasUsedOtherPackage = true;
+          }
+        }
+        _createChangePubspecAction(actionsByFile, transferInfo);
       });
-
+    if (!settings.allowSrcImport && isSrcDest && exportAssetId == null && hasUsedOtherPackage){
+      _addError('allowSrcImport=false; File "${transferInfo.source}" move to "${transferInfo.source}" not exported and used other packages');
+    }
   }
 
   List<Action> _getActionsByFile(Map<AssetId, List<Action>> actionsByFile, AssetId changeAsset) {

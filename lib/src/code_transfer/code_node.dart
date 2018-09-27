@@ -24,6 +24,14 @@ class Project{
   void addTransferInfo(TransferInfo tInfo) {
     _transferAssets.add(tInfo);
   }
+
+  AssetId getDestAsset(AssetId sourceId) {
+    var result = _transferAssets.firstWhere((item)=>item.source == sourceId, orElse: ()=>null);
+    if (result == null){
+      return sourceId;
+    }
+    return result.dest;
+  }
 }
 
 class PackageNode{

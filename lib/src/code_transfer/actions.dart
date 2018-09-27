@@ -22,7 +22,7 @@ abstract class Action{
   }
 }
 
-class _ChangeExportImportAction extends Action {
+class _ChangeExportImportAction<T> extends Action {
   static final dartFormatter = new DartFormatter();
   final int priority = 1;
   final Map<AssetId,AssetId> _replaceTo = <AssetId,AssetId>{};
@@ -35,7 +35,7 @@ class _ChangeExportImportAction extends Action {
     var fileNode = project.getOrCreatePackage(assetId.package).files[assetId];
     var compilationUnit = AstCloner.clone(fileNode.compilationUnit);
     (compilationUnit as CompilationUnit).directives.forEach((directive){
-      if (directive is NamespaceDirective){
+      if (directive is T && directive is NamespaceDirective){
         var source = directive.uriSource;
         if (source is AssetBasedSource) {
           AssetId replaceAssetId = _replaceTo[source.assetId];
@@ -56,11 +56,11 @@ class _ChangeExportImportAction extends Action {
 
 }
 
-class ChangeImportAction extends _ChangeExportImportAction{
+class ChangeImportAction extends _ChangeExportImportAction<ImportDirective>{
   ChangeImportAction();
 }
 
-class ChangeExportAction extends _ChangeExportImportAction{
+class ChangeExportAction extends _ChangeExportImportAction<ExportDirective>{
   ChangeExportAction();
 }
 
