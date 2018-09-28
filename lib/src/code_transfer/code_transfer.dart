@@ -515,7 +515,8 @@ class CodeTransfer{
       return;
     }
     if (settings.onlySimulation){
-      _log.info('onlySimulation=true; All ok');
+      _log.info('onlySimulation=true; SIMULATION - OK - ${totalActions} actions');
+      return;
     }
     var currentAction = 0;
     actionsByFile.forEach((assetId, actions) {

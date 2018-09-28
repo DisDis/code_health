@@ -16,5 +16,5 @@ class Settings {
   final bool onlySimulation;
   final bool generateFixCode;
 
-  Settings({this.allowMultiExport: true, this.allowSrcImport: false, this.forceExportFile: false, this.onlySimulation: false, this.generateFixCode: true});
+  Settings({this.allowMultiExport: true, this.allowSrcImport: true, this.forceExportFile: false, this.onlySimulation: false, this.generateFixCode: true});
 }

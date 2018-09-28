@@ -16,5 +16,5 @@ void initLog() {
 
 main(List<String> arguments) {
   initLog();
-  new CodeTransfer(new Settings(onlySimulation: true)).run();
+  new CodeTransfer(new Settings(onlySimulation: false, allowMultiExport: true)).run();
 }
