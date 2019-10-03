@@ -141,10 +141,10 @@ class ImportOptimizer{
       var source = element.source;
       var library = element.library;
       var optLibrary = library;
-      if (source is AssetBasedSource) {
-        var assetId = source.assetId;
+      if (!source.isInSystemLibrary) {
+        var assetId = new AssetId.resolve(source.uri.toString());
         
-        if (assetId.package != inputId.package && source.assetId.path.contains('/src/')){
+        if (assetId.package != inputId.package && assetId.path.contains('/src/')){
           if (settings.allowSrcImport){
             optLibrary = library;
           } else {
@@ -178,10 +178,11 @@ class ImportOptimizer{
   }
 
   Future<LibraryElement> _getOptimumLibraryWhichExportsElement(Element element, Resolver resolverI) async {
-    var source = element.library.source as AssetBasedSource;
+    // var source = element.library.source as AssetBasedSource;
+    var elementAssetId = new AssetId.resolve(element.library.source.uri.toString());;
     var result = element.library;
     var resultImportsCount = 99999999;
-    var assets = await io.reader.findAssets(new Glob('**.dart'), package: source.assetId.package).toList();
+    var assets = await io.reader.findAssets(new Glob('**.dart'), package: elementAssetId.package).toList();
     for (var assetId in assets) {
       if (!assetId.path.contains('/src/')) {
         
@@ -204,7 +205,7 @@ class ImportOptimizer{
           }
         }
         catch (e, s) {
-          _log.fine('Error asset: "$assetId" for "${source.assetId}"', e, s);
+          _log.fine('Error asset: "$assetId" for "${elementAssetId}"', e, s);
         }
       }
     }
@@ -232,8 +233,9 @@ class ImportOptimizer{
       final directives = new List<DirectiveInfo>();
       for (final library in libraries) {
         final source = library.source;
-        final importUri = (source is AssetBasedSource)
-            ? 'package:${source.assetId.package}${source.assetId.path.substring(3)}'
+        final assetId = new AssetId.resolve(source.uri.toString());
+        final importUri = (!source.isInSystemLibrary)
+            ? 'package:${assetId.package}${assetId.path.substring(3)}'
             : source.uri.toString();
 
         if (importUri == 'dart:core') continue;

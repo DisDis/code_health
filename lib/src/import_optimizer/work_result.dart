@@ -63,13 +63,14 @@ class WorkResult {
   void addStatisticLibrary(LibraryElement item) {
     if (!item.isDartCore && !item.isInSdk) {
       final source = item.source;
-      if (source is AssetBasedSource) {
-        _statisticsPerPackages.update(source.assetId.package,
+      if (!source.isInSystemLibrary) {
+        var assetId = new AssetId.resolve(source.uri.toString());
+        _statisticsPerPackages.update(assetId.package,
                 (value) => value + 1,
             ifAbsent: () => 1);
         if (settings.limitExportsPerFile > 0 && item.exportedLibraries.length > settings.limitExportsPerFile) {
           _statisticsPerExportOverLimit.update(
-              source.assetId, (v){v._uses++; return v;},ifAbsent:() => new _ExportStat(item.exportedLibraries.length));
+              assetId, (v){v._uses++; return v;},ifAbsent:() => new _ExportStat(item.exportedLibraries.length));
         }
       }
 

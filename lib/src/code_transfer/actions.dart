@@ -37,8 +37,9 @@ class _ChangeExportImportAction<T> extends Action {
     (compilationUnit as CompilationUnit).directives.forEach((directive){
       if (directive is T && directive is NamespaceDirective){
         var source = directive.uriSource;
-        if (source is AssetBasedSource) {
-          AssetId replaceAssetId = _replaceTo[source.assetId];
+        if (!source.isInSystemLibrary) {
+          var sourceAssetId = new AssetId.resolve(source.uri.toString());
+          AssetId replaceAssetId = _replaceTo[sourceAssetId];
           if (replaceAssetId != null) {
             var importStr = '\'${replaceAssetId.uri.toString()}\'';
             var newUri = astFactory.simpleStringLiteral(

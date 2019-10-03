@@ -191,10 +191,10 @@ class CodeTransfer{
       var source = element.source;
       var library = element.library;
       var optLibrary = library;
-      if (source is AssetBasedSource) {
-        var assetId = source.assetId;
+      if (!source.isInSystemLibrary) {
+        var assetId = new AssetId.resolve(source.uri.toString());
 
-        if (assetId.package != inputId.package && source.assetId.path.contains('/src/')){
+        if (assetId.package != inputId.package && assetId.path.contains('/src/')){
 //          if (settings.allowSrcImport){
             optLibrary = library;
 //          } else {
@@ -228,10 +228,11 @@ class CodeTransfer{
   }
 
   Future<LibraryElement> _getOptimumLibraryWhichExportsElement(Element element, Resolver resolverI) async {
-    var source = element.library.source as AssetBasedSource;
+    var source = element.library.source;
+    var sourceAssetId = new AssetId.resolve(source.uri.toString());
     var result = element.library;
     var resultImportsCount = 99999999;
-    var assets = await io.reader.findAssets(new Glob('**.dart'), package: source.assetId.package).toList();
+    var assets = await io.reader.findAssets(new Glob('**.dart'), package: sourceAssetId.package).toList();
     for (var assetId in assets) {
       if (!assetId.path.contains('/src/')) {
 
@@ -254,7 +255,7 @@ class CodeTransfer{
           }
         }
         catch (e, s) {
-          _log.fine('Error asset: "$assetId" for "${source.assetId}"', e, s);
+          _log.fine('Error asset: "$assetId" for "${sourceAssetId}"', e, s);
         }
       }
     }
@@ -405,26 +406,30 @@ class CodeTransfer{
     var fNode = new node.FileNode(assetId, lib.unit);
     for (var part in lib.parts) {
       var source = part.source;
-      if (source is AssetBasedSource) {
-        fNode.parts.add(source.assetId);
+      if (!source.isInSystemLibrary) {
+        var sourceAssetId = new AssetId.resolve(source.uri.toString());
+        fNode.parts.add(sourceAssetId);
       }
     }
     for (var library in lib.importedLibraries) {
       var source = library.source;
-      if (source is AssetBasedSource) {
-        fNode.directImports.add(source.assetId);
+      if (!source.isInSystemLibrary) {
+        var sourceAssetId = new AssetId.resolve(source.uri.toString());
+        fNode.directImports.add(sourceAssetId);
       }
     }
     for (var library in lib.exportedLibraries) {
       var source = library.source;
-      if (source is AssetBasedSource) {
-        fNode.exports.add(source.assetId);
+      if (!source.isInSystemLibrary) {
+        var sourceAssetId = new AssetId.resolve(source.uri.toString());
+        fNode.exports.add(sourceAssetId);
       }
     }
     for (var library in optLibraries) {
       var source = library.source;
-      if (source is AssetBasedSource) {
-        fNode.needImports.add(source.assetId);
+      if (!source.isInSystemLibrary) {
+        var sourceAssetId = new AssetId.resolve(source.uri.toString());
+        fNode.needImports.add(sourceAssetId);
       }
     }
     return fNode;
