@@ -23,4 +23,9 @@ class ResolverHelper {
   static bool isAstAnnotationByName(Annotation annotation, String _className) {
     return annotation.name.name == _className;
   }
+
+  static Future<CompilationUnit> getLibraryUnit(LibraryElement library) async {
+    final resolvedLibResult = await library.session.getResolvedLibraryByElement(library);
+    return resolvedLibResult.units.first.unit;
+  }
 }

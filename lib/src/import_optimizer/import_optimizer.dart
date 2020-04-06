@@ -1,33 +1,32 @@
 import 'dart:async';
 import 'dart:io';
 
-
+import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/ast/token.dart';
 import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/src/error/imports_verifier.dart';
 import 'package:build/build.dart';
+import 'package:build/src/builder/build_step_impl.dart';
 import 'package:build_resolvers/build_resolvers.dart';
-import 'package:build_runner/build_runner.dart';
+import 'package:build_resolvers/src/resolver.dart';
 import 'package:build_runner_core/build_runner_core.dart';
 import 'package:build_runner_core/src/asset/cache.dart';
 import 'package:code_health/import_optimizer.dart';
 import 'package:code_health/src/common/directive_info.dart';
 import 'package:code_health/src/common/directive_priority.dart';
+import 'package:code_health/src/common/resolver_helper.dart';
 import 'package:code_health/src/common/visitor/exported_elements_visitor.dart';
 import 'package:code_health/src/common/visitor/used_imported_elements_visitor.dart';
 import 'package:code_health/src/import_optimizer/work_result.dart';
 import 'package:glob/glob.dart';
-import 'package:analyzer/dart/ast/ast.dart';
-import 'package:build_resolvers/src/resolver.dart';
-import 'package:build/src/builder/build_step_impl.dart';
-
-import 'package:analyzer/dart/ast/token.dart';
 import 'package:logging/logging.dart' as log show Logger;
-import 'package:analyzer/src/generated/resolver.dart';
+import 'package:path/path.dart' as path;
 
 class ImportOptimizer{
   static final log.Logger _log = new log.Logger('ImportOptimizer');
   static final _resolvers = new AnalyzerResolvers();
   static final packageGraph = new PackageGraph.forThisPackage();
-  
+
   final io = new IOEnvironment(packageGraph, assumeTty:true);
   final _resourceManager = new ResourceManager();
   final WorkResult _workResult;
@@ -38,6 +37,7 @@ class ImportOptimizer{
 
   optimizePackage(String package) async {
     _log.info("Optimization package: '$package'");
+
     var assets = (await io.reader.findAssets(new Glob('lib/**.dart'), package: package).toList()).map((item)=>item.toString())
         .toList();
     optimizeFiles(assets);
@@ -75,17 +75,20 @@ class ImportOptimizer{
      try {
        var lib = await buildStep.inputLibrary;
        var usedImportedElementsVisitor = new UsedImportedElementsVisitor(lib);
-       lib.unit.accept(usedImportedElementsVisitor);
+
+       final libUnit = await ResolverHelper.getLibraryUnit(lib);
+
+       libUnit.accept(usedImportedElementsVisitor);
        var usedElements = _getUsedElements(usedImportedElementsVisitor.usedElements);
        var optLibraries = await _getLibrariesForElemets(inputId, usedElements, resolver);
-       var output = _generateImportText(inputId, lib, optLibraries);
+       var output = await _generateImportText(inputId, lib, optLibraries);
        if (output.isNotEmpty) {
          final stat = _workResult.statistics[inputId];
          print('// FileName: "$inputId"  unique old: ${stat.sourceNode} -> new: ${stat.optNode}, agg old: ${stat.sourceAggNode} -> new: ${stat.optAggNode}');
          print(output);
          if (settings.applyImports) {
-           final firstImport = lib.unit.directives.firstWhere((dir) => dir.keyword.keyword == Keyword.IMPORT);
-           final lastImport = lib.unit.directives.lastWhere((dir) => dir.keyword.keyword == Keyword.IMPORT);
+           final firstImport = libUnit.directives.firstWhere((dir) => dir.keyword.keyword == Keyword.IMPORT);
+           final lastImport = libUnit.directives.lastWhere((dir) => dir.keyword.keyword == Keyword.IMPORT);
 
            _replaceImportsInFile(inputId.path, output, firstImport.firstTokenAfterCommentAndMetadata.charOffset,
                lastImport.endToken.charOffset);
@@ -143,7 +146,7 @@ class ImportOptimizer{
       var optLibrary = library;
       if (!source.isInSystemLibrary) {
         var assetId = new AssetId.resolve(source.uri.toString());
-        
+
         if (assetId.package != inputId.package && assetId.path.contains('/src/')){
           if (settings.allowSrcImport){
             optLibrary = library;
@@ -167,9 +170,9 @@ class ImportOptimizer{
         var elementsImportedFromLibrary = libraries[library];
         for (var anotherLibrary in libraries.keys) {
           if (library != anotherLibrary) {
-              if (elementsImportedFromLibrary.every((element) => _isLibraryExportsElement(anotherLibrary, element))) {
-                  unnecessaryDependentLibraries.add(library);
-              }
+            if (await elementsImportedFromLibrary.asyncEvery((element) async => await _isLibraryExportsElement(anotherLibrary, element))) {
+              unnecessaryDependentLibraries.add(library);
+            }
           }
         }
       }
@@ -185,7 +188,7 @@ class ImportOptimizer{
     var assets = await io.reader.findAssets(new Glob('**.dart'), package: elementAssetId.package).toList();
     for (var assetId in assets) {
       if (!assetId.path.contains('/src/')) {
-        
+
         try {
           var resolver = resolverI;
           if (!await resolver.isLibrary(assetId)){
@@ -198,7 +201,7 @@ class ImportOptimizer{
           var library = await resolver.libraryFor(assetId);
           var count = _getNodeCount(library.exportedLibraries);
           if (resultImportsCount > count) {
-            if (_isLibraryExportsElement(library, element)) {
+            if (await _isLibraryExportsElement(library, element)) {
               result = library;
               resultImportsCount = count;
             }
@@ -220,7 +223,7 @@ class ImportOptimizer{
     return sum;
   }
 
-  String _generateImportText(AssetId inputId, LibraryElement sourceLibrary, Iterable<LibraryElement> libraries) {
+  Future<String> _generateImportText(AssetId inputId, LibraryElement sourceLibrary, Iterable<LibraryElement> libraries) async {
     var sb = new StringBuffer();
     _parseLibraryStat(sourceLibrary.importedLibraries);
     var sourceAccNodeCount = _getNodeCountAccumulate(sourceLibrary.importedLibraries);
@@ -245,7 +248,10 @@ class ImportOptimizer{
         if (settings.showImportNodes){
           importString += '// nodes: ${_getNodeCount([library])}';
         }
-        List<ImportDirective> existedImportDirectives = sourceLibrary.unit.directives.where((dir) => dir.keyword.keyword == Keyword.IMPORT);
+
+        final libUnit = await ResolverHelper.getLibraryUnit(library);
+
+        List<ImportDirective> existedImportDirectives = libUnit.directives.where((dir) => dir.keyword.keyword == Keyword.IMPORT);
         var isAnyImportContainsImportUrl = existedImportDirectives.any((importToken) => importToken.toSource().contains(importUri));
         if (!isAnyImportContainsImportUrl) {
           directives.add(new DirectiveInfo(priority, importUri, importString));
@@ -272,9 +278,12 @@ class ImportOptimizer{
     return sb.toString();
   }
 
-  bool _isLibraryExportsElement(LibraryElement library, Element elem) {
+  Future<bool> _isLibraryExportsElement(LibraryElement library, Element elem) async {
     var visitor = new ExportedElementsVisitor(library);
-    library.unit.accept(visitor);
+
+    final libUnit = await ResolverHelper.getLibraryUnit(library);
+
+    libUnit.accept(visitor);
     if (visitor.elements.any((element) => element.name == elem.name)) {
       return true;
     }
@@ -292,7 +301,7 @@ class ImportOptimizer{
          elements.add(element);
        }
      });
-     
+
      usedElements.elements.forEach((element) {
        var library = element.library;
        if (library != null &&
@@ -354,4 +363,13 @@ class ImportOptimizer{
   }
 
 
+}
+
+extension on Iterable {
+  Future<bool> asyncEvery(Future<bool> test(Element element)) async {
+    for (final element in this) {
+      if (!(await test(element))) return false;
+    }
+    return true;
+  }
 }

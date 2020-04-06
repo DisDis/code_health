@@ -1,12 +1,13 @@
 import 'dart:async';
-import 'dart:io';
 
-//import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/analyzer.dart';
 import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/src/error/imports_verifier.dart';
+import 'package:analyzer/src/generated/engine.dart';
 import 'package:build/build.dart';
+import 'package:build/src/builder/build_step_impl.dart';
 import 'package:build_resolvers/build_resolvers.dart';
-import 'package:build_runner/build_runner.dart';
+import 'package:build_resolvers/src/resolver.dart';
 import 'package:build_runner_core/build_runner_core.dart';
 import 'package:build_runner_core/src/asset/cache.dart';
 import 'package:code_health/code_transfer.dart';
@@ -14,19 +15,11 @@ import 'package:code_health/src/code_transfer/actions.dart';
 import 'package:code_health/src/code_transfer/code_node.dart' as node;
 import 'package:code_health/src/code_transfer/work_result.dart';
 import 'package:code_health/src/common/resolver_helper.dart';
-//import 'package:code_health/src/common/directive_info.dart';
-//import 'package:code_health/src/common/directive_priority.dart';
 import 'package:code_health/src/common/visitor/exported_elements_visitor.dart';
 import 'package:code_health/src/common/visitor/used_imported_elements_visitor.dart';
-//import 'package:code_health/src/common/visitor/used_imported_elements_visitor.dart';
 import 'package:glob/glob.dart';
-//import 'package:analyzer/dart/ast/ast.dart';
-import 'package:build_resolvers/src/resolver.dart';
-import 'package:build/src/builder/build_step_impl.dart';
-import 'package:analyzer/src/generated/resolver.dart';
 import 'package:logging/logging.dart' as log show Logger;
-import 'package:package_resolver/package_resolver.dart';
-import 'package:analyzer/src/generated/engine.dart';
+import 'package:path/path.dart' as path;
 
 class CodeTransfer{
   static final log.Logger _log = new log.Logger('CodeTransfer');
@@ -111,22 +104,25 @@ class CodeTransfer{
     try {
       var lib = await buildStep.inputLibrary;
       var usedImportedElementsVisitor = new UsedImportedElementsVisitor(lib);
-      lib.unit.accept(usedImportedElementsVisitor);
+
+      final libUnit = await ResolverHelper.getLibraryUnit(lib);
+
+      libUnit.accept(usedImportedElementsVisitor);
       var usedElements = _getUsedElements(usedImportedElementsVisitor.usedElements);
       var optLibraries = await _getLibrariesForElemets(inputId, usedElements, resolver);
       var packageNode = _project.getOrCreatePackage(inputId.package);
-      var fileNode = _libraryElementToFileNode(inputId, lib, optLibraries);
+      var fileNode = await _libraryElementToFileNode(inputId, lib, optLibraries);
 //      parseCompilationUnit(lib.source.contents.data)
       packageNode.files[inputId] = fileNode;
 
 
-      for (var declaration in lib.unit.declarations) {
+      for (var declaration in libUnit.declarations) {
           var annotation = ResolverHelper.getAnnotation(declaration, annotationName);
           if (annotation != null){
             fileNode.transferAssetId = _annotationToAssetId(inputId, annotation);
           }
       }
-      for (var declaration in lib.unit.directives) {
+      for (var declaration in libUnit.directives) {
         var annotation = ResolverHelper.getAnnotation(declaration, annotationName);
         if (annotation != null){
           fileNode.transferAssetId = _annotationToAssetId(inputId, annotation);
@@ -137,7 +133,7 @@ class CodeTransfer{
         _project.addTransferInfo(new node.TransferInfo(fileNode.assetId, fileNode.transferAssetId));
       }
 
-      
+
 
 //      var output = _generateImportText(inputId, lib, optLibraries);
 //      if (output.isNotEmpty) {
@@ -248,7 +244,7 @@ class CodeTransfer{
           var library = await resolver.libraryFor(assetId);
           var count = _getNodeCount(library.exportedLibraries);
           if (resultImportsCount > count) {
-            if (_isLibraryExportsElement(library, element)) {
+            if (await _isLibraryExportsElement(library, element)) {
               result = library;
               resultImportsCount = count;
             }
@@ -321,9 +317,12 @@ class CodeTransfer{
     return sb.toString();*/
   }
 
-  bool _isLibraryExportsElement(LibraryElement library, Element elem) {
+  Future<bool> _isLibraryExportsElement(LibraryElement library, Element elem) async {
     var visitor = new ExportedElementsVisitor(library);
-    library.unit.accept(visitor);
+
+    final libUnit = await ResolverHelper.getLibraryUnit(library);
+
+    libUnit.accept(visitor);
     if (visitor.elements.any((element) => element.name == elem.name)) {
       return true;
     }
@@ -402,8 +401,11 @@ class CodeTransfer{
     });
   }
 
-  node.FileNode _libraryElementToFileNode(AssetId assetId, LibraryElement lib, Iterable<LibraryElement> optLibraries) {
-    var fNode = new node.FileNode(assetId, lib.unit);
+  Future<node.FileNode> _libraryElementToFileNode(AssetId assetId, LibraryElement lib, Iterable<LibraryElement> optLibraries) async {
+
+    final libUnit = await ResolverHelper.getLibraryUnit(lib);
+
+    var fNode = new node.FileNode(assetId, libUnit);
     for (var part in lib.parts) {
       var source = part.source;
       if (!source.isInSystemLibrary) {
