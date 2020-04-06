@@ -1,16 +1,16 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:yaml/yaml.dart' as yaml;
 import 'package:analyzer/analyzer.dart';
 import 'package:analyzer/dart/ast/standard_ast_factory.dart';
 import 'package:analyzer/dart/ast/token.dart';
-import 'package:build/build.dart';
-import 'package:code_health/src/code_transfer/code_node.dart';
-import 'package:build_resolvers/src/resolver.dart';
 import 'package:analyzer/src/dart/ast/token.dart';
 import 'package:analyzer/src/dart/ast/utilities.dart' show NodeReplacer;
+import 'package:build/build.dart';
+import 'package:code_health/src/code_transfer/code_node.dart';
 import 'package:dart_style/dart_style.dart';
+import 'package:path/path.dart' as path;
+import 'package:yaml/yaml.dart' as yaml;
 
 abstract class Action{
   int get priority;

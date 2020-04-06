@@ -1,6 +1,5 @@
 import 'package:analyzer/dart/element/element.dart';
 import 'package:build/build.dart';
-import 'package:build_resolvers/src/resolver.dart';
 import 'package:code_health/import_optimizer.dart';
 
 class WorkResult {

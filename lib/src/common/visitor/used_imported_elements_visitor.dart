@@ -1,8 +1,7 @@
-
 import 'package:analyzer/analyzer.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/element.dart';
-import 'package:analyzer/src/generated/resolver.dart';
+import 'package:analyzer/src/error/imports_verifier.dart';
 
 /**
  * A visitor that visits ASTs and fills [UsedImportedElements].
